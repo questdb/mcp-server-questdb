@@ -15,7 +15,7 @@ export const CONNECT_TOOL: ToolSchema = {
     "DO NOT skip step (2). Calling `wait_for_pairing` without first " +
     "showing the credentials guarantees a timeout — the user has no " +
     "credentials to enter, so they cannot pair. " +
-    "Idempotent during pairing; returns paired:true if already paired.",
+    "Returns paired:true if already paired.",
   inputSchema: {
     type: "object",
     properties: {},
@@ -111,6 +111,7 @@ export type PairingToolsContext = {
   getCredentials: () => { wsUrl: string; token: string }
   getPairingState: () => PairingSnapshot
   waitForPair: (timeoutMs: number) => Promise<WaitForPairResult>
+  openBrowser?: (url: string) => Promise<boolean>
 }
 
 const DEFAULT_PAIRING_POLL_TIMEOUT_MS = 50_000
@@ -181,7 +182,7 @@ export const createPairingToolHandlers = (
   ctx: PairingToolsContext,
   counters: Counters = { waitRetries: 0 },
 ) => {
-  const handleConnectWebConsole = (): ToolResultPayload => {
+  const handleConnectWebConsole = async (): Promise<ToolResultPayload> => {
     const state = ctx.getPairingState()
     if (!state.paired && state.incompatible) {
       return buildIncompatiblePayload(state.incompatible)
@@ -203,8 +204,16 @@ export const createPairingToolHandlers = (
     }
     const url = ctx.buildDeepLink()
     const { wsUrl, token } = ctx.getCredentials()
+    const opened = ctx.openBrowser ? await ctx.openBrowser(url) : false
+    const browserOpened = opened
+      ? "Browser automatically opened with the pairing deep link — the user may already see the pairing dialog."
+      : "Browser could not be opened automatically. The user needs to click the deep link or enter the credentials manually — show them the userMessage."
     const userMessage =
-      `To pair with the QuestDB Web Console:\n\n` +
+      (opened
+        ? `A browser tab pointing at the QuestDB Web Console should have just ` +
+          `opened — follow the pairing instructions there.\n\n` +
+          `If no tab opened, pair manually:\n\n`
+        : `To pair with the QuestDB Web Console:\n\n`) +
       `  Option 1 — click this link and follow the instructions: ${url}\n\n` +
       `  Option 2 — open the QuestDB Web Console, click the MCP connection status at\n` +
       `  the bottom of the screen, and enter these values manually:\n` +
@@ -219,6 +228,7 @@ export const createPairingToolHandlers = (
             deepLink: url,
             wsUrl,
             token,
+            browserOpened,
             nextStep: "wait_for_pairing",
             // Pre-rendered text the assistant SHOULD show the user. Smaller
             // models often skim past prose instructions about "show these

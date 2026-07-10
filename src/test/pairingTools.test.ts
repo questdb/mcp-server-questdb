@@ -53,9 +53,9 @@ describe("PAIRING_TOOLS schema", () => {
 })
 
 describe("get_pairing_credentials handler", () => {
-  it("returns paired:false JSON when unpaired (deepLink + wsUrl + token + nextStep, camelCase)", () => {
+  it("returns paired:false JSON when unpaired (deepLink + wsUrl + token + nextStep, camelCase)", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(makeCtx())
-    const out = handleConnectWebConsole()
+    const out = await handleConnectWebConsole()
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(parsed.paired).toBe(false)
     expect(parsed.deepLink).toContain("mcp-pair=1")
@@ -64,9 +64,9 @@ describe("get_pairing_credentials handler", () => {
     expect(parsed.nextStep).toBe("wait_for_pairing")
   })
 
-  it("includes a pre-rendered userMessage that shows BOTH the deep link and ws_url+token", () => {
+  it("includes a pre-rendered userMessage that shows BOTH the deep link and ws_url+token", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(makeCtx())
-    const out = handleConnectWebConsole()
+    const out = await handleConnectWebConsole()
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(typeof parsed.userMessage).toBe("string")
     const msg = parsed.userMessage as string
@@ -75,9 +75,41 @@ describe("get_pairing_credentials handler", () => {
     expect(msg).toContain("abcdefghijklmnopqrst1234")
   })
 
-  it("includes assistantNextActions ordered: show user first, then call wait_for_pairing", () => {
+  it("reports success in browserOpened and leads the userMessage with the opened tab", async () => {
+    const { handleConnectWebConsole } = createPairingToolHandlers(
+      makeCtx({ openBrowser: () => Promise.resolve(true) }),
+    )
+    const out = await handleConnectWebConsole()
+    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    expect(parsed.browserOpened).toMatch(/automatically opened/i)
+    expect(parsed.userMessage as string).toMatch(/should have just\s+opened/i)
+    // Manual fallback must survive even when the tab opened.
+    expect(parsed.userMessage as string).toContain("mcp-pair=1")
+    expect(parsed.userMessage as string).toContain("ws://127.0.0.1:57123")
+  })
+
+  it("reports failure in browserOpened when the launcher cannot start (and when absent)", async () => {
+    for (const openBrowser of [
+      () => Promise.resolve(false),
+      undefined,
+    ] as const) {
+      const { handleConnectWebConsole } = createPairingToolHandlers(
+        makeCtx({ openBrowser }),
+      )
+      const out = await handleConnectWebConsole()
+      const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+      expect(parsed.browserOpened).toMatch(/could not be opened/i)
+      expect(parsed.browserOpened).toMatch(/userMessage/)
+      // No misleading "a tab just opened" lead-in on the failure path.
+      expect(parsed.userMessage as string).toMatch(
+        /^To pair with the QuestDB Web Console/,
+      )
+    }
+  })
+
+  it("includes assistantNextActions ordered: show user first, then call wait_for_pairing", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(makeCtx())
-    const out = handleConnectWebConsole()
+    const out = await handleConnectWebConsole()
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(Array.isArray(parsed.assistantNextActions)).toBe(true)
     const actions = parsed.assistantNextActions as string[]
@@ -89,7 +121,7 @@ describe("get_pairing_credentials handler", () => {
     expect(waitIdx).toBeGreaterThan(showIdx)
   })
 
-  it("returns paired:true JSON with consoleOrigin + permissions (camelCase) when already paired", () => {
+  it("returns paired:true JSON with consoleOrigin + permissions (camelCase) when already paired", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(
       makeCtx({
         getPairingState: () => ({
@@ -101,7 +133,7 @@ describe("get_pairing_credentials handler", () => {
         }),
       }),
     )
-    const out = handleConnectWebConsole()
+    const out = await handleConnectWebConsole()
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(parsed.paired).toBe(true)
     expect(parsed.consoleOrigin).toBe("http://127.0.0.1:9000")
@@ -110,7 +142,7 @@ describe("get_pairing_credentials handler", () => {
     expect(parsed.warning).toBeUndefined()
   })
 
-  it("surfaces a version-mismatch warning in the already-paired branch", () => {
+  it("surfaces a version-mismatch warning in the already-paired branch", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(
       makeCtx({
         getPairingState: () => ({
@@ -125,7 +157,7 @@ describe("get_pairing_credentials handler", () => {
         }),
       }),
     )
-    const out = handleConnectWebConsole()
+    const out = await handleConnectWebConsole()
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(parsed.paired).toBe(true)
     expect(typeof parsed.warning).toBe("string")
@@ -146,7 +178,7 @@ describe("get_pairing_credentials handler", () => {
     ).toBe(true)
   })
 
-  it("returns an actionable incompatible_bridge error when the console was refused", () => {
+  it("returns an actionable incompatible_bridge error when the console was refused", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(
       makeCtx({
         getPairingState: () => ({
@@ -158,7 +190,7 @@ describe("get_pairing_credentials handler", () => {
         }),
       }),
     )
-    const out = handleConnectWebConsole()
+    const out = await handleConnectWebConsole()
     expect(out.isError).toBe(true)
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(parsed.paired).toBe(false)
@@ -170,7 +202,7 @@ describe("get_pairing_credentials handler", () => {
     expect(Array.isArray(parsed.assistantNextActions)).toBe(true)
   })
 
-  it("is idempotent — repeated calls produce the same payload", () => {
+  it("returns the same credentials payload across repeated calls", async () => {
     let calls = 0
     const { handleConnectWebConsole } = createPairingToolHandlers(
       makeCtx({
@@ -180,10 +212,10 @@ describe("get_pairing_credentials handler", () => {
         },
       }),
     )
-    const a = handleConnectWebConsole().content[0].text
-    const b = handleConnectWebConsole().content[0].text
+    const a = (await handleConnectWebConsole()).content[0].text
+    const b = (await handleConnectWebConsole()).content[0].text
     expect(a).toBe(b)
-    expect(calls).toBe(2) // still calls the builder; just produces a stable answer
+    expect(calls).toBe(2)
   })
 })
 

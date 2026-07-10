@@ -10,7 +10,7 @@ const pairingThatReturns = (
   credentials: ToolResultPayload,
   waitResult: ToolResultPayload = okText("{}"),
 ) => ({
-  handleConnectWebConsole: () => credentials,
+  handleConnectWebConsole: () => Promise.resolve(credentials),
   handleWaitForPairing: () => Promise.resolve(waitResult),
 })
 
@@ -137,15 +137,39 @@ describe("dispatchToolCall — request handler", () => {
     expect(session.callBrowserTool).not.toHaveBeenCalled()
   })
 
-  it("redacts pairing credentials from the DEBUG log but logs functional content verbatim", async () => {
-    // Given a log spy and credentials whose payload carries a secret token
+  it("redacts realistic pairing credentials from the DEBUG log but logs functional content verbatim", async () => {
+    // Given a log spy and a real-shaped credentials payload with secrets in
+    // multiple fields, including the pre-rendered message shown to the user.
     const lines: string[] = []
     const log: Log = (_level, ...args) => {
       lines.push(args.join(" "))
     }
     const token = "SUPER_SECRET_TOKEN_xyz"
+    const wsUrl = "ws://127.0.0.1:57123"
+    const deepLink = `http://127.0.0.1:9000/?mcp-pair=1&mcp-token=${token}`
+    const userMessage =
+      `To pair with the QuestDB Web Console:\n\n` +
+      `  Option 1 — click this link and follow the instructions: ${deepLink}\n\n` +
+      `  Option 2 — enter these values manually:\n` +
+      `    WebSocket URL: ${wsUrl}\n` +
+      `    Token:         ${token}\n`
     const credentials = okText(
-      JSON.stringify({ paired: false, token, consoleOrigin: "http://127.0.0.1:9000" }),
+      JSON.stringify({
+        paired: false,
+        deepLink,
+        wsUrl,
+        token,
+        browserOpened:
+          "Browser automatically opened with the pairing deep link — the user may already see the pairing dialog.",
+        consoleOrigin: "http://127.0.0.1:9000",
+        permissions: { grantSchemaAccess: true, read: true, write: false },
+        nextStep: "wait_for_pairing",
+        userMessage,
+        assistantNextActions: [
+          "Write a message to the user containing the `userMessage` text above.",
+          "Then, in the SAME turn, call wait_for_pairing.",
+        ],
+      }),
     )
 
     // When get_pairing_credentials is dispatched (with debug logging)
@@ -155,8 +179,13 @@ describe("dispatchToolCall — request handler", () => {
       {},
     )
 
-    // Then the token never appears in any log line
-    expect(lines.some((l) => l.includes(token))).toBe(false)
+    const pairingLog = lines.join("\n")
+    expect(pairingLog).not.toContain(token)
+    expect(pairingLog).not.toContain(wsUrl)
+    expect(pairingLog).not.toContain(deepLink)
+    expect(pairingLog).not.toContain(userMessage)
+    expect(pairingLog).not.toContain("assistantNextActions")
+    expect(pairingLog).toContain("browserOpened")
 
     // And a functional tool's content is logged verbatim
     lines.length = 0

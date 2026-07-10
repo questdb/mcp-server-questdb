@@ -16,6 +16,7 @@ import {
 } from "./pairingTools.js"
 import { BUNDLED_FUNCTIONAL_TOOLS } from "./bundledTools.js"
 import { MCP_BRIDGE_VERSION } from "./protocolVersion.js"
+import { openInBrowser } from "./openBrowser.js"
 import type { BridgeSession } from "./bridgeSession.js"
 import type { Log, ToolResultPayload } from "./types.js"
 
@@ -33,6 +34,7 @@ export const safePairingCredentialsSummary = (
       paired: parsed.paired,
       consoleOrigin: parsed.consoleOrigin,
       permissions: parsed.permissions,
+      browserOpened: parsed.browserOpened,
     })
   } catch {
     return null
@@ -143,7 +145,7 @@ const SERVER_INSTRUCTIONS = [
 ].join("\n")
 
 type PairingHandlers = {
-  handleConnectWebConsole: () => ToolResultPayload
+  handleConnectWebConsole: () => Promise<ToolResultPayload>
   handleWaitForPairing: (
     args: { timeout_ms?: number } | undefined,
   ) => Promise<ToolResultPayload>
@@ -170,7 +172,7 @@ export const dispatchToolCall = async (
     if (isPairingToolName(name)) {
       result =
         name === "get_pairing_credentials"
-          ? pairing.handleConnectWebConsole()
+          ? await pairing.handleConnectWebConsole()
           : await pairing.handleWaitForPairing(args)
     } else {
       result = await session.callBrowserTool(name, args, signal)
@@ -233,6 +235,7 @@ export const startMcpServer = async ({
   const pairingCtx: PairingToolsContext = {
     buildDeepLink: () => session.buildDeepLink(),
     getCredentials: () => session.getCredentials(),
+    openBrowser: (url) => openInBrowser(url, log),
     getPairingState: () => session.getPairingSnapshot(),
     waitForPair: (timeoutMs) => {
       return session.waitForPair(timeoutMs).then((snap) => {
