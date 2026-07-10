@@ -184,7 +184,9 @@ export const runSetup = async (): Promise<number> => {
           anyFail = true
           out(`  ${red("✖")} ${res.agent}: ${res.error}\n    ${gray(res.path)}\n\n`)
         } else {
-          out(`  ${green("✔")} ${res.agent} ${res.status}\n    ${gray(res.path)}\n\n`)
+          const label =
+            res.status === "reconfigured" ? "configured (overwritten)" : "configured"
+          out(`  ${green("✔")} ${res.agent} ${label}\n    ${gray(res.path)}\n\n`)
         }
       }
       out(

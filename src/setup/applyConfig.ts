@@ -2,9 +2,14 @@ import { access } from "node:fs/promises"
 import type { AgentConfig, AgentId, BridgeEnv } from "./agents.js"
 import { SERVER_NAME } from "./agents.js"
 import {
+  execCodex,
+  getCodexServer,
+  putCodexServer,
+  type ExecFn,
+} from "./codexCli.js"
+import {
   readRawFile,
   upsertJsonServer,
-  upsertTomlServer,
   writeRawFile,
 } from "./configWriter.js"
 
@@ -50,15 +55,27 @@ export const resolveConfigPath = async (candidates: string[]): Promise<string> =
 export const applyAgentConfig = async (
   agent: AgentConfig,
   env: BridgeEnv,
+  codexExec: ExecFn = execCodex,
 ): Promise<ApplyResult> => {
   const entry = agent.buildEntry(env)
   const path = await resolveConfigPath(agent.configPaths)
   try {
+    if (agent.format === "codex-cli") {
+      const existing = await getCodexServer(SERVER_NAME, codexExec)
+      await putCodexServer(SERVER_NAME, entry, codexExec)
+      return {
+        agent: agent.displayName,
+        path,
+        status: existing !== null ? "reconfigured" : "configured",
+      }
+    }
     const raw = await readRawFile(path)
-    const { content, alreadyExists } =
-      agent.format === "toml"
-        ? upsertTomlServer(raw, agent.configKey, SERVER_NAME, entry)
-        : upsertJsonServer(raw, agent.configKey, SERVER_NAME, entry)
+    const { content, alreadyExists } = upsertJsonServer(
+      raw,
+      agent.configKey,
+      SERVER_NAME,
+      entry,
+    )
     await writeRawFile(path, content)
     return {
       agent: agent.displayName,
