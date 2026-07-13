@@ -22,6 +22,18 @@ export type ExecResult = { code: number; stdout: string; stderr: string }
 // the inherited environment (so CODEX_HOME passes through).
 export type ExecFn = (args: string[]) => Promise<ExecResult>
 
+export const codexNotFoundError = (): Error =>
+  Object.assign(
+    new Error(
+      "codex CLI not found on PATH — install Codex or update it, then re-run",
+    ),
+    { code: "codex-not-found" },
+  )
+
+export const isCodexNotFound = (err: unknown): boolean =>
+  err instanceof Error &&
+  (err as Error & { code?: string }).code === "codex-not-found"
+
 export const execCodex: ExecFn = (args) =>
   new Promise((resolve, reject) => {
     execFile(
@@ -31,11 +43,7 @@ export const execCodex: ExecFn = (args) =>
       (err, stdout, stderr) => {
         const e = err as (Error & { code?: number | string }) | null
         if (e && e.code === "ENOENT") {
-          reject(
-            new Error(
-              "codex CLI not found on PATH — install Codex (npm i -g @openai/codex) or update it, then re-run",
-            ),
-          )
+          reject(codexNotFoundError())
           return
         }
         if (e && typeof e.code !== "number") {
@@ -44,6 +52,13 @@ export const execCodex: ExecFn = (args) =>
           return
         }
         const code = e === null ? 0 : typeof e.code === "number" ? e.code : 1
+        // shell:true masks ENOENT on Windows: cmd.exe spawns fine and exits
+        // 9009 ("'codex' is not recognized as an internal or external
+        // command") when the binary is missing.
+        if (WINDOWS && (code === 9009 || stderr.includes("is not recognized"))) {
+          reject(codexNotFoundError())
+          return
+        }
         resolve({ code, stdout, stderr })
       },
     )

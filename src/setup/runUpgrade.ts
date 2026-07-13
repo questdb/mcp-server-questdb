@@ -9,6 +9,7 @@ import { resolveConfigPath } from "./applyConfig.js"
 import {
   execCodex,
   getCodexServer,
+  isCodexNotFound,
   putCodexServer,
   sameCodexEntry,
   stringEnv,
@@ -65,8 +66,10 @@ type AgentOutcome =
 
 // Codex path: same PUT semantics, but read and write go through the codex CLI
 // (`mcp get --json` / `mcp add`), which owns config.toml and validates it
-// before writing. Every CLI failure — binary missing, broken config, codex
-// too old for `--json` — surfaces as "failed", never a blind write.
+// before writing. A missing codex binary means the agent isn't installed —
+// "absent", like a missing config file for the JSON agents. Every other CLI
+// failure — broken config, codex too old for `--json` — surfaces as "failed",
+// never a blind write.
 const upgradeCodexAgent = async (
   agent: AgentConfig,
   exec: ExecFn,
@@ -76,6 +79,7 @@ const upgradeCodexAgent = async (
   try {
     existing = await getCodexServer(SERVER_NAME, exec)
   } catch (err) {
+    if (isCodexNotFound(err)) return { agent: agent.displayName, kind: "absent" }
     return {
       agent: agent.displayName,
       kind: "failed",

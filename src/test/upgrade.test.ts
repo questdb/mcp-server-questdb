@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest"
 import { parseCli } from "../cli.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
 import { buildAgents, type AgentConfig } from "../setup/agents.js"
-import type { ExecFn, ExecResult } from "../setup/codexCli.js"
+import {
+  codexNotFoundError,
+  type ExecFn,
+  type ExecResult,
+} from "../setup/codexCli.js"
 import { describeOldPin, upgradeAgent } from "../setup/runUpgrade.js"
 
 const SPEC = `@questdb/mcp-bridge@${MCP_BRIDGE_VERSION}`
@@ -270,6 +274,11 @@ describe("upgradeAgent — PUT semantics", () => {
         stderr: "Error: No MCP server named 'questdb' found.\n",
       },
     ])
+    expect((await upgradeAgent(agents.codex, exec)).kind).toBe("absent")
+  })
+
+  it("reports codex absent when the codex CLI is not installed", async () => {
+    const exec: ExecFn = () => Promise.reject(codexNotFoundError())
     expect((await upgradeAgent(agents.codex, exec)).kind).toBe("absent")
   })
 

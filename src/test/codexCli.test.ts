@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
+  codexNotFoundError,
   getCodexServer,
+  isCodexNotFound,
   putCodexServer,
   sameCodexEntry,
   stringEnv,
@@ -138,6 +140,16 @@ describe("putCodexServer", () => {
     await expect(
       putCodexServer("questdb", { command: "npx", args: [] }, exec),
     ).rejects.toThrow("codex mcp add")
+  })
+})
+
+describe("isCodexNotFound", () => {
+  it("recognizes the marker error by code, not message", () => {
+    expect(isCodexNotFound(codexNotFoundError())).toBe(true)
+    expect(isCodexNotFound(new Error("codex CLI not found on PATH"))).toBe(
+      false,
+    )
+    expect(isCodexNotFound(null)).toBe(false)
   })
 })
 
