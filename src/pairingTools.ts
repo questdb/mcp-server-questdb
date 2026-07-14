@@ -132,8 +132,7 @@ const buildVersionUserMessage = (m: VersionMismatch): string =>
 const buildVersionWarning = (m: VersionMismatch): string =>
   `version_mismatch (bridge v${m.bridgeVersion} vs console-expected ` +
   `v${m.expectedBridgeVersion}): show the \`userMessage\` to the user verbatim ` +
-  `and offer to run the upgrade command for them. Newer features (e.g. naming ` +
-  `cells) need the matching bridge; existing tools keep working meanwhile.`
+  `and offer to run the upgrade command for them. Newer features need the matching bridge; existing tools keep working meanwhile.`
 
 // Ordered imperatives so weaker models can't skim past the prose `warning`:
 // they MUST tell the user and MUST surface the `upgrade` command as a suggestion.
