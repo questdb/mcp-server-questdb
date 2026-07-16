@@ -214,11 +214,13 @@ export const dispatchToolCall = async (
 type StartMcpServerArgs = {
   session: BridgeSession
   log?: Log
+  ensureListening: () => Promise<void>
 }
 
 export const startMcpServer = async ({
   session,
   log,
+  ensureListening,
 }: StartMcpServerArgs) => {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -233,6 +235,7 @@ export const startMcpServer = async ({
   )
 
   const pairingCtx: PairingToolsContext = {
+    ensureListening,
     buildDeepLink: () => session.buildDeepLink(),
     getCredentials: () => session.getCredentials(),
     openBrowser: (url) => openInBrowser(url, log),

@@ -2,6 +2,7 @@ import type { Log } from "./types.js"
 
 export type ShutdownDeps = {
   stopMcp: () => Promise<void>
+  settleWs: () => Promise<void>
   getStopWs: () => (() => Promise<void>) | null
   exit: (code: number) => void
   log: Log
@@ -37,6 +38,7 @@ export const createShutdownController = (
     } catch (err) {
       void err
     }
+    await withTimeout(deps.settleWs(), stepBudgetMs)
     const stopWs = deps.getStopWs()
     if (stopWs) {
       try {

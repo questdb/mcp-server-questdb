@@ -47,7 +47,7 @@ Or add it to your MCP client's config by hand (e.g. `~/.claude/.mcp.json`):
 | Label             | Value                                | Default Value                                          | Description                                                                              |
 | ----------------- | ------------------------------------ | ------------------------------------------------ | ---------------------------------------------------------------------------------- |
 | `CONSOLE_ORIGIN`  | origin URL                           | `http://127.0.0.1:9000`                          | QuestDB Web Console origin. `127.0.0.1` and `localhost` are interchangeable.       |
-| `MCP_BRIDGE_PORT` | `1`–`65535`                          | auto-allocated                                   | When specified, the bridge uses a fixed port. Bridge fails to start if specified port is taken.                                  |
+| `MCP_BRIDGE_PORT` | `1`–`65535`                          | auto-allocated                                   | When specified, the bridge uses a fixed port. The port is bound on the first pairing attempt, pairing fails with a `bridge_bind_failed` error if the port is taken. |
 | `LOG_PATH`        | file path                            | `/tmp/questdb-mcp-bridge/<ISO-ts>-<pid>.log`     | Override the log file location.                                                    |
 | `LOG_LEVEL`       | `ERROR` / `WARN` / `INFO` / `DEBUG`  | `INFO`                                           | `DEBUG` adds heartbeats and full tool payloads.                                    |
 

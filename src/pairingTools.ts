@@ -112,6 +112,7 @@ export type PairingToolsContext = {
   getPairingState: () => PairingSnapshot
   waitForPair: (timeoutMs: number) => Promise<WaitForPairResult>
   openBrowser?: (url: string) => Promise<boolean>
+  ensureListening: () => Promise<void>
 }
 
 const DEFAULT_PAIRING_POLL_TIMEOUT_MS = 50_000
@@ -175,6 +176,29 @@ const buildIncompatiblePayload = (inc: VersionMismatch): ToolResultPayload => ({
   isError: true,
 })
 
+const buildBindFailurePayload = (err: unknown): ToolResultPayload => ({
+  content: [
+    {
+      type: "text",
+      text: JSON.stringify({
+        paired: false,
+        reason: "bridge_bind_failed",
+        error: err instanceof Error ? err.message : String(err),
+        userMessage:
+          "The QuestDB MCP bridge could not open its local connection — its " +
+          "WebSocket port could not be bound. If you set MCP_BRIDGE_PORT, make " +
+          "sure that port is free (or unset it to auto-allocate a port), then " +
+          "try pairing again.",
+        assistantNextActions: [
+          "Show the `userMessage` text to the user.",
+          "If MCP_BRIDGE_PORT is pinned, suggest freeing that port or unsetting it, then call get_pairing_credentials again to retry.",
+        ],
+      }),
+    },
+  ],
+  isError: true,
+})
+
 type Counters = { waitRetries: number }
 
 export const createPairingToolHandlers = (
@@ -200,6 +224,11 @@ export const createPairingToolHandlers = (
       return {
         content: [{ type: "text", text: JSON.stringify(payload) }],
       }
+    }
+    try {
+      await ctx.ensureListening()
+    } catch (err) {
+      return buildBindFailurePayload(err)
     }
     const url = ctx.buildDeepLink()
     const { wsUrl, token } = ctx.getCredentials()

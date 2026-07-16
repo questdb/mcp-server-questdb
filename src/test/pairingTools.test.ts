@@ -18,6 +18,7 @@ const makeCtx = (overrides: Partial<PairingToolsContext> = {}): PairingToolsCont
   }),
   getPairingState: () => ({ paired: false }),
   waitForPair: () => Promise.resolve({ paired: false, reason: "timeout" }),
+  ensureListening: () => Promise.resolve(),
   ...overrides,
 })
 
@@ -200,6 +201,77 @@ describe("get_pairing_credentials handler", () => {
       "npx @questdb/mcp-bridge@2.0.0 upgrade",
     )
     expect(Array.isArray(parsed.assistantNextActions)).toBe(true)
+  })
+
+  it("opens the ws server (ensureListening) before building the deep link", async () => {
+    const order: string[] = []
+    const { handleConnectWebConsole } = createPairingToolHandlers(
+      makeCtx({
+        ensureListening: () => {
+          order.push("ensureListening")
+          return Promise.resolve()
+        },
+        buildDeepLink: () => {
+          order.push("buildDeepLink")
+          return "http://127.0.0.1:9000/?mcp-pair=1"
+        },
+      }),
+    )
+    const out = await handleConnectWebConsole()
+    expect(out.isError).toBeFalsy()
+    // The deep link must never be minted before the port is listening.
+    expect(order).toEqual(["ensureListening", "buildDeepLink"])
+  })
+
+  it("returns a retryable bind-failure error (no deep link) when ensureListening rejects", async () => {
+    let built = false
+    const { handleConnectWebConsole } = createPairingToolHandlers(
+      makeCtx({
+        ensureListening: () =>
+          Promise.reject(
+            new Error(
+              "could not bind MCP_BRIDGE_PORT=9999 (EADDRINUSE). Pick a different port or unset MCP_BRIDGE_PORT to auto-allocate.",
+            ),
+          ),
+        buildDeepLink: () => {
+          built = true
+          return "should-not-be-called"
+        },
+      }),
+    )
+    const out = await handleConnectWebConsole()
+    expect(out.isError).toBe(true)
+    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    expect(parsed.paired).toBe(false)
+    expect(parsed.reason).toBe("bridge_bind_failed")
+    expect(parsed.error as string).toContain("MCP_BRIDGE_PORT=9999")
+    expect(typeof parsed.userMessage).toBe("string")
+    expect(Array.isArray(parsed.assistantNextActions)).toBe(true)
+    // Bind failed → we must not hand out a dead deep link.
+    expect(built).toBe(false)
+  })
+
+  it("does not attempt to bind when already paired (server already listening)", async () => {
+    let called = false
+    const { handleConnectWebConsole } = createPairingToolHandlers(
+      makeCtx({
+        ensureListening: () => {
+          called = true
+          return Promise.resolve()
+        },
+        getPairingState: () => ({
+          paired: true,
+          sessionId: "s1",
+          consoleOrigin: "http://127.0.0.1:9000",
+          permissions: { grantSchemaAccess: true, read: true, write: false },
+          versionMismatch: null,
+        }),
+      }),
+    )
+    const out = await handleConnectWebConsole()
+    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    expect(parsed.paired).toBe(true)
+    expect(called).toBe(false)
   })
 
   it("returns the same credentials payload across repeated calls", async () => {

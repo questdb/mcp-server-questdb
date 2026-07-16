@@ -1163,6 +1163,13 @@ describe("BridgeSession — deep link", () => {
     expect(link).toContain("ws%3A%2F%2F127.0.0.1%3A57123")
     expect(link).toContain("the-token")
   })
+
+  it("throws rather than mint ws://127.0.0.1:0 before the port is bound", () => {
+    // port 0 = "not listening yet"; a deep link built now would be dead.
+    const { session } = makeSession({ getPort: () => 0 })
+    expect(() => session.buildDeepLink()).toThrow(/not listening/)
+    expect(() => session.getCredentials()).toThrow(/not listening/)
+  })
 })
 
 describe("BridgeSession — tool argument validation", () => {

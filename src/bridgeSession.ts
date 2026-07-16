@@ -182,11 +182,20 @@ export class BridgeSession {
     return this.state
   }
 
+  private wsUrl(): string {
+    const port = this.config.getPort()
+    if (!port) {
+      throw new Error(
+        "cannot build pairing URL: WebSocket server is not listening yet",
+      )
+    }
+    return `ws://127.0.0.1:${port}`
+  }
+
   buildDeepLink(): string {
-    const url = `ws://127.0.0.1:${this.config.getPort()}`
     const params = new URLSearchParams({
       "mcp-pair": "1",
-      "mcp-ws": url,
+      "mcp-ws": this.wsUrl(),
       "mcp-token": this.config.token,
     })
     return `${this.config.consoleOrigin}/?${params.toString()}`
@@ -194,7 +203,7 @@ export class BridgeSession {
 
   getCredentials(): { wsUrl: string; token: string } {
     return {
-      wsUrl: `ws://127.0.0.1:${this.config.getPort()}`,
+      wsUrl: this.wsUrl(),
       token: this.config.token,
     }
   }
