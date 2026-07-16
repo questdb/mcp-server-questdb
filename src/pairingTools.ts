@@ -15,10 +15,23 @@ export const CONNECT_TOOL: ToolSchema = {
     "DO NOT skip step (2). Calling `wait_for_pairing` without first " +
     "showing the credentials guarantees a timeout — the user has no " +
     "credentials to enter, so they cannot pair. " +
+    "By default this also auto-opens the deep link in the user's default browser; " +
+    "pass auto_open_browser:false to suppress that and just return the " +
+    "credentials. " +
     "Returns paired:true if already paired.",
   inputSchema: {
     type: "object",
-    properties: {},
+    properties: {
+      auto_open_browser: {
+        type: "boolean",
+        description:
+          "Whether to automatically open the pairing deep link in the " +
+          "user's browser. Defaults to true. Pass false to suppress the " +
+          "auto-open (e.g. headless / CI / background contexts, or when you " +
+          "don't want to steal the user's focus) and just return the " +
+          "credentials for them to open manually.",
+      },
+    },
     additionalProperties: false,
   },
 }
@@ -205,7 +218,9 @@ export const createPairingToolHandlers = (
   ctx: PairingToolsContext,
   counters: Counters = { waitRetries: 0 },
 ) => {
-  const handleConnectWebConsole = async (): Promise<ToolResultPayload> => {
+  const handleConnectWebConsole = async (
+    args?: Record<string, unknown>,
+  ): Promise<ToolResultPayload> => {
     const state = ctx.getPairingState()
     if (!state.paired && state.incompatible) {
       return buildIncompatiblePayload(state.incompatible)
@@ -232,10 +247,13 @@ export const createPairingToolHandlers = (
     }
     const url = ctx.buildDeepLink()
     const { wsUrl, token } = ctx.getCredentials()
-    const opened = ctx.openBrowser ? await ctx.openBrowser(url) : false
+    const autoOpen = args?.auto_open_browser !== false
+    const opened = autoOpen && ctx.openBrowser ? await ctx.openBrowser(url) : false
     const browserOpened = opened
       ? "Browser automatically opened with the pairing deep link — the user may already see the pairing dialog."
-      : "Browser could not be opened automatically. The user needs to click the deep link or enter the credentials manually — show them the userMessage."
+      : autoOpen
+        ? "Browser could not be opened automatically. The user needs to click the deep link or enter the credentials manually — show them the userMessage."
+        : "Automatic browser open was skipped (auto_open_browser:false). Show the user the userMessage so they can open the deep link or pair manually."
     const userMessage =
       (opened
         ? `A browser tab pointing at the QuestDB Web Console should have just ` +

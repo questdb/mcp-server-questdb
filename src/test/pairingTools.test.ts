@@ -40,6 +40,16 @@ describe("PAIRING_TOOLS schema", () => {
     }
   })
 
+  it("declares auto_open_browser as an optional boolean on get_pairing_credentials", () => {
+    const schema = CONNECT_TOOL.inputSchema as {
+      properties?: Record<string, { type?: string }>
+      required?: string[]
+    }
+    expect(schema.properties?.auto_open_browser?.type).toBe("boolean")
+    // Optional: never listed as required, so omitting it keeps the default.
+    expect(schema.required ?? []).not.toContain("auto_open_browser")
+  })
+
   it("isPairingToolName narrows correctly", () => {
     expect(isPairingToolName("get_pairing_credentials")).toBe(true)
     expect(isPairingToolName("wait_for_pairing")).toBe(true)
@@ -105,6 +115,49 @@ describe("get_pairing_credentials handler", () => {
       expect(parsed.userMessage as string).toMatch(
         /^To pair with the QuestDB Web Console/,
       )
+    }
+  })
+
+  it("does not auto-open the browser when auto_open_browser is false", async () => {
+    let openCalls = 0
+    const { handleConnectWebConsole } = createPairingToolHandlers(
+      makeCtx({
+        openBrowser: () => {
+          openCalls += 1
+          return Promise.resolve(true)
+        },
+      }),
+    )
+    const out = await handleConnectWebConsole({ auto_open_browser: false })
+    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    // The launcher must not run when the agent opted out.
+    expect(openCalls).toBe(0)
+    // browserOpened reads as a deliberate skip, NOT a launcher failure.
+    expect(parsed.browserOpened).toMatch(/skipped/i)
+    expect(parsed.browserOpened).toMatch(/auto_open_browser/)
+    // Manual-pairing lead-in, and the credentials still returned in full.
+    expect(parsed.userMessage as string).toMatch(
+      /^To pair with the QuestDB Web Console/,
+    )
+    expect(parsed.userMessage as string).toContain("mcp-pair=1")
+    expect(parsed.userMessage as string).toContain("ws://127.0.0.1:57123")
+  })
+
+  it("auto-opens by default and when auto_open_browser is explicitly true", async () => {
+    for (const args of [undefined, { auto_open_browser: true }] as const) {
+      let openCalls = 0
+      const { handleConnectWebConsole } = createPairingToolHandlers(
+        makeCtx({
+          openBrowser: () => {
+            openCalls += 1
+            return Promise.resolve(true)
+          },
+        }),
+      )
+      const out = await handleConnectWebConsole(args)
+      const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+      expect(openCalls).toBe(1)
+      expect(parsed.browserOpened).toMatch(/automatically opened/i)
     }
   })
 

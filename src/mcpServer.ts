@@ -145,7 +145,9 @@ const SERVER_INSTRUCTIONS = [
 ].join("\n")
 
 type PairingHandlers = {
-  handleConnectWebConsole: () => Promise<ToolResultPayload>
+  handleConnectWebConsole: (
+    args?: Record<string, unknown>,
+  ) => Promise<ToolResultPayload>
   handleWaitForPairing: (
     args: { timeout_ms?: number } | undefined,
   ) => Promise<ToolResultPayload>
@@ -172,7 +174,7 @@ export const dispatchToolCall = async (
     if (isPairingToolName(name)) {
       result =
         name === "get_pairing_credentials"
-          ? await pairing.handleConnectWebConsole()
+          ? await pairing.handleConnectWebConsole(args)
           : await pairing.handleWaitForPairing(args)
     } else {
       result = await session.callBrowserTool(name, args, signal)
