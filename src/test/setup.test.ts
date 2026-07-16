@@ -4,17 +4,14 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { parseCli } from "../cli.js"
 import { buildAgents, BRIDGE_PACKAGE_SPEC } from "../setup/agents.js"
-import { resolveConfigPath } from "../setup/applyConfig.js"
+import { applyAgentConfig, resolveConfigPath } from "../setup/applyConfig.js"
+import type { ExecFn, ExecResult } from "../setup/codexCli.js"
 import {
   buildBridgeEnv,
   validateConsoleOrigin,
   validatePort,
 } from "../setup/env.js"
-import {
-  buildTomlServerBlock,
-  upsertJsonServer,
-  upsertTomlServer,
-} from "../setup/configWriter.js"
+import { upsertJsonServer } from "../setup/configWriter.js"
 
 describe("parseCli", () => {
   it("routes the setup command to the setup outcome", () => {
@@ -79,14 +76,13 @@ describe("agents — buildEntry", () => {
     })
   })
 
-  it("uses TOML only for Codex and JSON for the rest", () => {
+  it("delegates Codex to its CLI and edits JSON files for the rest", () => {
     // Given all agents
     const agents = buildAgents()
 
     // When inspecting their formats
-    // Then only Codex is TOML
-    expect(agents.codex.format).toBe("toml")
-    expect(agents.codex.configKey).toBe("mcp_servers")
+    // Then only Codex goes through `codex mcp`
+    expect(agents.codex.format).toBe("codex-cli")
     for (const id of ["claude", "cursor", "gemini", "opencode"] as const) {
       expect(agents[id].format).toBe("json")
     }
@@ -304,95 +300,88 @@ describe("upsertJsonServer", () => {
   })
 })
 
-describe("upsertTomlServer", () => {
-  const entry = {
-    command: "npx",
-    args: ["-y", "@questdb/mcp-bridge"],
-    env: { LOG_LEVEL: "DEBUG" },
+describe("applyAgentConfig — codex CLI delegation", () => {
+  const fakeCodex = (
+    results: ExecResult[],
+  ): { exec: ExecFn; calls: string[][] } => {
+    const calls: string[][] = []
+    const exec: ExecFn = (args) => {
+      calls.push(args)
+      const r = results[calls.length - 1]
+      return r
+        ? Promise.resolve(r)
+        : Promise.reject(new Error("unexpected codex call"))
+    }
+    return { exec, calls }
   }
 
-  it("appends a new block with an env subtable", () => {
-    // Given an empty config
-    // When upserting our server
-    const { content, alreadyExists } = upsertTomlServer("", "mcp_servers", "questdb", entry)
+  const absent: ExecResult = {
+    code: 1,
+    stdout: "",
+    stderr: "Error: No MCP server named 'questdb' found.\n",
+  }
+  const added: ExecResult = {
+    code: 0,
+    stdout: "Added global MCP server 'questdb'.\n",
+    stderr: "",
+  }
+  const existing: ExecResult = {
+    code: 0,
+    stdout: JSON.stringify({
+      name: "questdb",
+      transport: { type: "stdio", command: "npx", args: ["-y", "old"] },
+    }),
+    stderr: "",
+  }
 
-    // Then a fresh block with its env subtable is written
-    expect(alreadyExists).toBe(false)
-    expect(content).toContain("[mcp_servers.questdb]")
-    expect(content).toContain('command = "npx"')
-    expect(content).toContain("[mcp_servers.questdb.env]")
-    expect(content).toContain('LOG_LEVEL = "DEBUG"')
-  })
+  it("PUTs via `codex mcp add` and reports configured on a fresh setup", async () => {
+    // Given codex has no questdb server yet
+    const { exec, calls } = fakeCodex([absent, added])
 
-  it("preserves a pre-existing unrelated section", () => {
-    // Given a config with another section
-    const existing = "[other]\nx = 1\n"
-
-    // When upserting our server
-    const { content } = upsertTomlServer(existing, "mcp_servers", "questdb", entry)
-
-    // Then the other section survives alongside ours
-    expect(content).toContain("[other]")
-    expect(content).toContain("x = 1")
-    expect(content).toContain("[mcp_servers.questdb]")
-  })
-
-  it("is idempotent: re-upserting the same entry is a no-op", () => {
-    // Given a config already containing our server
-    const first = upsertTomlServer("[other]\nx = 1\n", "mcp_servers", "questdb", entry)
-
-    // When upserting the same entry again
-    const second = upsertTomlServer(first.content, "mcp_servers", "questdb", entry)
-
-    // Then the content is unchanged and reports a reconfigure
-    expect(second.alreadyExists).toBe(true)
-    expect(second.content).toBe(first.content)
-  })
-
-  it("matches a header carrying an inline comment instead of duplicating it", () => {
-    // Given an existing block whose header carries a trailing comment
-    const existing = '[mcp_servers.questdb] # my notes\ncommand = "old"\n'
-
-    // When upserting our server
-    const { content, alreadyExists } = upsertTomlServer(
-      existing,
-      "mcp_servers",
-      "questdb",
-      entry,
+    // When applying with an env override
+    const res = await applyAgentConfig(
+      buildAgents().codex,
+      { CONSOLE_ORIGIN: "http://x" },
+      exec,
     )
 
-    // Then it replaces the block in place — exactly one header, no duplicate table
-    expect(alreadyExists).toBe(true)
-    expect(content.match(/\[mcp_servers\.questdb\]/g)?.length).toBe(1)
-    expect(content).not.toContain('command = "old"')
+    // Then the entry is added through the codex CLI with the env re-passed
+    expect(res.status).toBe("configured")
+    expect(calls[1]).toEqual([
+      "mcp",
+      "add",
+      "questdb",
+      "--env",
+      "CONSOLE_ORIGIN=http://x",
+      "--",
+      "npx",
+      "-y",
+      BRIDGE_PACKAGE_SPEC,
+    ])
   })
 
-  it("replaces an existing block instead of duplicating it", () => {
-    // Given a config with our server at LOG_LEVEL=DEBUG
-    const first = upsertTomlServer("", "mcp_servers", "questdb", entry)
+  it("reports reconfigured when a questdb entry already existed", async () => {
+    // Given codex already has a questdb server
+    const { exec } = fakeCodex([existing, added])
 
-    // When upserting with a different env value
-    const changed = upsertTomlServer(first.content, "mcp_servers", "questdb", {
-      ...entry,
-      env: { LOG_LEVEL: "WARN" },
-    })
+    // When applying
+    const res = await applyAgentConfig(buildAgents().codex, {}, exec)
 
-    // Then the block is replaced in place, leaving exactly one header
-    expect(changed.alreadyExists).toBe(true)
-    expect(changed.content).toContain('LOG_LEVEL = "WARN"')
-    expect(changed.content).not.toContain('LOG_LEVEL = "DEBUG"')
-    expect(changed.content.match(/\[mcp_servers\.questdb\]/g)?.length).toBe(1)
+    // Then the overwrite is reported as a reconfigure
+    expect(res.status).toBe("reconfigured")
   })
 
-  it("omits the env subtable when env is empty", () => {
-    // Given an entry without env
-    const envless = { command: "npx", args: ["-y", "@questdb/mcp-bridge"] }
+  it("reports failed when the codex CLI errors", async () => {
+    // Given a codex whose config can't be loaded
+    const { exec } = fakeCodex([
+      { code: 1, stdout: "", stderr: "Error: failed to load configuration\n" },
+    ])
 
-    // When building its TOML block
-    const block = buildTomlServerBlock("mcp_servers", "questdb", envless)
+    // When applying
+    const res = await applyAgentConfig(buildAgents().codex, {}, exec)
 
-    // Then no env subtable is emitted
-    expect(block).toContain("[mcp_servers.questdb]")
-    expect(block).not.toContain(".env]")
+    // Then nothing is reported as written
+    expect(res.status).toBe("failed")
+    expect(res.error).toContain("codex mcp get")
   })
 })

@@ -8,7 +8,8 @@ import {
   InvalidConsoleOriginError,
 } from "./wsServer.js"
 import { startMcpServer } from "./mcpServer.js"
-import { bindWithRetry, type AttemptListenFn } from "./bindWithRetry.js"
+import { type AttemptListenFn } from "./bindWithRetry.js"
+import { createWsListener } from "./wsListener.js"
 import { createShutdownController } from "./shutdown.js"
 import { parseCli, parsePort } from "./cli.js"
 import { Logger } from "./logger.js"
@@ -33,7 +34,7 @@ const PER_TOOL_TIMEOUT_MS: Record<string, number> = {
   set_cell_mode: 15_000,
   set_cell_chart_config: 15_000,
   set_cell_autorefresh: 15_000,
-  set_cell_chart_maximized: 15_000,
+  set_cell_view_maximized: 15_000,
   set_cell_maximized: 15_000,
   list_cells: 15_000,
   get_cell: 15_000,
@@ -47,6 +48,7 @@ const USAGE = `@questdb/mcp-bridge — bridge coding agents to a running QuestDB
 Usage:
   npx @questdb/mcp-bridge [start]    Start the bridge (default when no command is given)
   npx @questdb/mcp-bridge setup      Configure the bridge for your coding agents (interactive)
+  npx @questdb/mcp-bridge upgrade    Re-pin existing coding-agent configs to this version
   npx @questdb/mcp-bridge --version  Print the version and exit
   npx @questdb/mcp-bridge --help     Print this help and exit
 `
@@ -85,6 +87,12 @@ if (cli.kind === "setup") {
   process.exit(code)
 }
 
+if (cli.kind === "upgrade") {
+  const { runUpgrade } = await import("./setup/runUpgrade.js")
+  const code = await runUpgrade()
+  process.exit(code)
+}
+
 const logger = new Logger()
 const { log, fatal } = logger
 
@@ -93,15 +101,7 @@ const main = async () => {
   if ("error" in portChoice) {
     fatal(portChoice.error, 2)
   }
-  let port: number
-  let isPinned: boolean
-  if ("pinned" in portChoice) {
-    port = portChoice.pinned
-    isPinned = true
-  } else {
-    port = await findFreePort()
-    isPinned = false
-  }
+  const pinnedPort = "pinned" in portChoice ? portChoice.pinned : null
 
   const consoleOrigin = process.env.CONSOLE_ORIGIN ?? DEFAULT_CONSOLE_ORIGIN
   let allowedOrigins: string[]
@@ -115,6 +115,8 @@ const main = async () => {
   }
 
   const token = generateToken()
+
+  let port = 0
 
   const session = new BridgeSession({
     token,
@@ -139,39 +141,31 @@ const main = async () => {
       log,
       onFatalError: (kind, err) => fatalShutdown(kind, err),
     })
-  try {
-    const bound = await bindWithRetry({
-      port,
-      isPinned,
-      attemptListen,
-      findFreePort,
-      log,
-    })
-    stopWs = bound.stop
-    port = bound.port
-  } catch (err) {
-    const code = (err as Error & { code?: string }).code
-    if (code === "port-pinned-in-use" || code === "port-exhausted") {
-      fatal(err instanceof Error ? err.message : String(err), 2)
-    }
-    fatal(err instanceof Error ? err.message : String(err), 1)
-  }
 
-  const mcp = await startMcpServer({ session, log })
+  const { ensureListening, settle: settleWs } = createWsListener({
+    pinnedPort,
+    attemptListen,
+    findFreePort,
+    onListening: (stop, boundPort) => {
+      stopWs = stop
+      port = boundPort
+    },
+    log,
+  })
+
+  const mcp = await startMcpServer({ session, log, ensureListening })
 
   log("INFO", `@questdb/mcp-bridge v${MCP_BRIDGE_VERSION}`)
-  log("INFO", `listening on ws://127.0.0.1:${port}`)
+  log("INFO", `ws server: deferred until first pairing`)
   log("INFO", `console origin: ${consoleOrigin}`)
-  log(
-    "INFO",
-    `log file: ${logger.getFilePath() ?? "(disabled — stderr only)"}`,
-  )
+  log("INFO", `log file: ${logger.getFilePath() ?? "(disabled — stderr only)"}`)
   log("INFO", `log level: ${logger.getLevelName()}`)
 
   const SHUTDOWN_STEP_BUDGET_MS = 2_000
   const SHUTDOWN_HARD_BUDGET_MS = 5_000
   const { shutdown, requestFatal } = createShutdownController({
     stopMcp: () => mcp.stop(),
+    settleWs,
     getStopWs: () => stopWs,
     exit: (code: number) => process.exit(code),
     log,

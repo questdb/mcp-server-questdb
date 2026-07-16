@@ -1,8 +1,4 @@
-import type {
-  MCPPermissions,
-  ToolResultPayload,
-  ToolSchema,
-} from "./types.js"
+import type { MCPPermissions, ToolResultPayload, ToolSchema } from "./types.js"
 
 export const CONNECT_TOOL: ToolSchema = {
   name: "get_pairing_credentials",
@@ -19,10 +15,23 @@ export const CONNECT_TOOL: ToolSchema = {
     "DO NOT skip step (2). Calling `wait_for_pairing` without first " +
     "showing the credentials guarantees a timeout — the user has no " +
     "credentials to enter, so they cannot pair. " +
-    "Idempotent during pairing; returns paired:true if already paired.",
+    "By default this also auto-opens the deep link in the user's default browser; " +
+    "pass auto_open_browser:false to suppress that and just return the " +
+    "credentials. " +
+    "Returns paired:true if already paired.",
   inputSchema: {
     type: "object",
-    properties: {},
+    properties: {
+      auto_open_browser: {
+        type: "boolean",
+        description:
+          "Whether to automatically open the pairing deep link in the " +
+          "user's browser. Defaults to true. Pass false to suppress the " +
+          "auto-open (e.g. headless / CI / background contexts, or when you " +
+          "don't want to steal the user's focus) and just return the " +
+          "credentials for them to open manually.",
+      },
+    },
     additionalProperties: false,
   },
 }
@@ -44,9 +53,10 @@ export const WAIT_TOOL: ToolSchema = {
     "maxRetriesHint:10}` on timeout — call again to keep waiting (up " +
     "to ~10 retries / ~8 min) until the user pairs. " +
     "If the bridge version doesn't match what the web console expects, " +
-    "the success payload includes a `warning` plus a pre-rendered " +
-    "`userMessage`; show the `userMessage` to the user verbatim before " +
-    "proceeding. " +
+    "the success payload includes a `warning`, a pre-rendered `userMessage`, " +
+    "and `assistantNextActions`; you MUST show the `userMessage` to the user " +
+    "verbatim AND suggest running the `npx @questdb/mcp-bridge@<version> " +
+    "upgrade` command (offer to run it for them) before proceeding. " +
     "If pairing is refused outright for an incompatible bridge, the result " +
     "is `{paired:false, reason:'incompatible_bridge', userMessage, " +
     "assistantNextActions}` — show the `userMessage` verbatim and STOP " +
@@ -114,6 +124,8 @@ export type PairingToolsContext = {
   getCredentials: () => { wsUrl: string; token: string }
   getPairingState: () => PairingSnapshot
   waitForPair: (timeoutMs: number) => Promise<WaitForPairResult>
+  openBrowser?: (url: string) => Promise<boolean>
+  ensureListening: () => Promise<void>
 }
 
 const DEFAULT_PAIRING_POLL_TIMEOUT_MS = 50_000
@@ -126,15 +138,32 @@ const RECOMMENDED_MAX_RETRIES = 10
 // the exact npm version the console was verified against, so it doubles as the
 // pin to install.
 const buildVersionUserMessage = (m: VersionMismatch): string =>
-  `Version mismatch: this MCP bridge is @questdb/mcp-bridge v${m.bridgeVersion}, ` +
-  `but the QuestDB Web Console expects v${m.expectedBridgeVersion}. ` +
-  `Update your MCP server command to \`npx @questdb/mcp-bridge@${m.expectedBridgeVersion} start\`, ` +
-  `restart your coding agent, then pair again.`
+  `Web Console expects @questdb/mcp-bridge v${m.expectedBridgeVersion} but ` +
+  `you're running v${m.bridgeVersion}. Run ` +
+  `\`npx @questdb/mcp-bridge@${m.expectedBridgeVersion} upgrade\`, then restart ` +
+  `this coding agent (the running bridge keeps the old version until restart).`
 
 const buildVersionWarning = (m: VersionMismatch): string =>
   `version_mismatch (bridge v${m.bridgeVersion} vs console-expected ` +
-  `v${m.expectedBridgeVersion}): show the \`userMessage\` field to the user ` +
-  `verbatim before proceeding. Some tools may not work properly until the correct bridge version is used.`
+  `v${m.expectedBridgeVersion}): show the \`userMessage\` to the user verbatim ` +
+  `and offer to run the upgrade command for them. Newer features need the matching bridge; existing tools keep working meanwhile.`
+
+// Ordered imperatives so weaker models can't skim past the prose `warning`:
+// they MUST tell the user and MUST surface the `upgrade` command as a suggestion.
+const buildVersionMismatchActions = (m: VersionMismatch): string[] => [
+  "You MUST show the `userMessage` text to the user verbatim — they need to know the bridge is out of date.",
+  `You MUST suggest running \`npx @questdb/mcp-bridge@${m.expectedBridgeVersion} upgrade\` and offer to run it for them — it re-pins your coding-agent config to the matching bridge version.`,
+  "After it succeeds, tell the user to restart this coding agent so the upgraded bridge launches (the running process stays on the old version until restart).",
+]
+
+const attachVersionMismatch = (
+  payload: Record<string, unknown>,
+  m: VersionMismatch,
+): void => {
+  payload.warning = buildVersionWarning(m)
+  payload.userMessage = buildVersionUserMessage(m)
+  payload.assistantNextActions = buildVersionMismatchActions(m)
+}
 
 // Returned when the console tried to pair but its expected bridge major differs
 // — pairing was refused, so this is a terminal error for the agent: surface the
@@ -150,8 +179,32 @@ const buildIncompatiblePayload = (inc: VersionMismatch): ToolResultPayload => ({
         userMessage: buildVersionUserMessage(inc),
         assistantNextActions: [
           "Show the `userMessage` text to the user verbatim.",
-          `Tell them to set their MCP server command to \`npx @questdb/mcp-bridge@${inc.expectedBridgeVersion} start\` and restart this coding agent.`,
+          `Offer to run \`npx @questdb/mcp-bridge@${inc.expectedBridgeVersion} upgrade\` for them — it re-pins your coding-agent config to the matching bridge version.`,
+          "After it succeeds, have them restart this coding agent so the new bridge launches.",
           "Stop calling wait_for_pairing — pairing cannot succeed until the bridge version is updated.",
+        ],
+      }),
+    },
+  ],
+  isError: true,
+})
+
+const buildBindFailurePayload = (err: unknown): ToolResultPayload => ({
+  content: [
+    {
+      type: "text",
+      text: JSON.stringify({
+        paired: false,
+        reason: "bridge_bind_failed",
+        error: err instanceof Error ? err.message : String(err),
+        userMessage:
+          "The QuestDB MCP bridge could not open its local connection — its " +
+          "WebSocket port could not be bound. If you set MCP_BRIDGE_PORT, make " +
+          "sure that port is free (or unset it to auto-allocate a port), then " +
+          "try pairing again.",
+        assistantNextActions: [
+          "Show the `userMessage` text to the user.",
+          "If MCP_BRIDGE_PORT is pinned, suggest freeing that port or unsetting it, then call get_pairing_credentials again to retry.",
         ],
       }),
     },
@@ -165,7 +218,9 @@ export const createPairingToolHandlers = (
   ctx: PairingToolsContext,
   counters: Counters = { waitRetries: 0 },
 ) => {
-  const handleConnectWebConsole = (): ToolResultPayload => {
+  const handleConnectWebConsole = async (
+    args?: Record<string, unknown>,
+  ): Promise<ToolResultPayload> => {
     const state = ctx.getPairingState()
     if (!state.paired && state.incompatible) {
       return buildIncompatiblePayload(state.incompatible)
@@ -179,19 +234,32 @@ export const createPairingToolHandlers = (
           "Already paired with the QuestDB Web Console; notebook tools are available.",
       }
       if (state.versionMismatch) {
-        payload.warning = buildVersionWarning(state.versionMismatch)
-        payload.userMessage = buildVersionUserMessage(state.versionMismatch)
+        attachVersionMismatch(payload, state.versionMismatch)
       }
       return {
-        content: [
-          { type: "text", text: JSON.stringify(payload) },
-        ],
+        content: [{ type: "text", text: JSON.stringify(payload) }],
       }
+    }
+    try {
+      await ctx.ensureListening()
+    } catch (err) {
+      return buildBindFailurePayload(err)
     }
     const url = ctx.buildDeepLink()
     const { wsUrl, token } = ctx.getCredentials()
+    const autoOpen = args?.auto_open_browser !== false
+    const opened = autoOpen && ctx.openBrowser ? await ctx.openBrowser(url) : false
+    const browserOpened = opened
+      ? "Browser automatically opened with the pairing deep link — the user may already see the pairing dialog."
+      : autoOpen
+        ? "Browser could not be opened automatically. The user needs to click the deep link or enter the credentials manually — show them the userMessage."
+        : "Automatic browser open was skipped (auto_open_browser:false). Show the user the userMessage so they can open the deep link or pair manually."
     const userMessage =
-      `To pair with the QuestDB Web Console:\n\n` +
+      (opened
+        ? `A browser tab pointing at the QuestDB Web Console should have just ` +
+          `opened — follow the pairing instructions there.\n\n` +
+          `If no tab opened, pair manually:\n\n`
+        : `To pair with the QuestDB Web Console:\n\n`) +
       `  Option 1 — click this link and follow the instructions: ${url}\n\n` +
       `  Option 2 — open the QuestDB Web Console, click the MCP connection status at\n` +
       `  the bottom of the screen, and enter these values manually:\n` +
@@ -206,6 +274,7 @@ export const createPairingToolHandlers = (
             deepLink: url,
             wsUrl,
             token,
+            browserOpened,
             nextStep: "wait_for_pairing",
             // Pre-rendered text the assistant SHOULD show the user. Smaller
             // models often skim past prose instructions about "show these
@@ -252,8 +321,7 @@ export const createPairingToolHandlers = (
         permissions: initial.permissions,
       }
       if (initial.versionMismatch) {
-        payload.warning = buildVersionWarning(initial.versionMismatch)
-        payload.userMessage = buildVersionUserMessage(initial.versionMismatch)
+        attachVersionMismatch(payload, initial.versionMismatch)
       }
       return {
         content: [{ type: "text", text: JSON.stringify(payload) }],
@@ -270,8 +338,7 @@ export const createPairingToolHandlers = (
         permissions: result.permissions,
       }
       if (result.versionMismatch) {
-        payload.warning = buildVersionWarning(result.versionMismatch)
-        payload.userMessage = buildVersionUserMessage(result.versionMismatch)
+        attachVersionMismatch(payload, result.versionMismatch)
       }
       return {
         content: [{ type: "text", text: JSON.stringify(payload) }],

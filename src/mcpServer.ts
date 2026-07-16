@@ -16,6 +16,7 @@ import {
 } from "./pairingTools.js"
 import { BUNDLED_FUNCTIONAL_TOOLS } from "./bundledTools.js"
 import { MCP_BRIDGE_VERSION } from "./protocolVersion.js"
+import { openInBrowser } from "./openBrowser.js"
 import type { BridgeSession } from "./bridgeSession.js"
 import type { Log, ToolResultPayload } from "./types.js"
 
@@ -33,6 +34,7 @@ export const safePairingCredentialsSummary = (
       paired: parsed.paired,
       consoleOrigin: parsed.consoleOrigin,
       permissions: parsed.permissions,
+      browserOpened: parsed.browserOpened,
     })
   } catch {
     return null
@@ -92,6 +94,39 @@ const SERVER_INSTRUCTIONS = [
   "",
   "═══════════════════════════════════════════════════════════════════",
   "",
+  "═══════════════════════ PERMISSIONS — READ FIRST ═══════════════════",
+  "",
+  "The user grants three independent scopes, reported as",
+  "permissions:{grantSchemaAccess,read,write} in the pairing result.",
+  "They gate access to the QuestDB INSTANCE and its DATA only — never",
+  "the web console itself:",
+  "",
+  "  • grantSchemaAccess — schema introspection. false ⇒ get_tables,",
+  "    get_table_schema, get_table_details return PERMISSION_DENIED.",
+  "  • read — whether YOU receive data rows. false ⇒ run_query on a",
+  "    SELECT/SHOW returns no data to you. It does NOT stop you from",
+  "    authoring DQL cells and running or drawing them: run_cell,",
+  "    add_cell(run:true), draw-mode cells, and apply_notebook_state",
+  "    execute DQL in the user's browser and the USER sees the",
+  "    results — you just never see the rows. Running or drawing a",
+  "    DQL cell never needs read.",
+  "  • write — DDL/DML execution (CREATE/INSERT/UPDATE/DELETE/DROP/…).",
+  "    false ⇒ such statements are rejected by run_query and never run",
+  "    by run_cell; a cell containing a write cannot be executed. DQL",
+  "    is unaffected.",
+  "",
+  "ALWAYS AVAILABLE regardless of scope: every notebook authoring and",
+  "editing tool (create_notebook, add_cell, update_cell,",
+  "apply_notebook_state, set_cell_*, move_cell_*, delete_cell, …). You",
+  "can always BUILD and REARRANGE notebooks; permissions only gate",
+  "touching the live database and its data.",
+  "",
+  "Operations outside the granted scope return PERMISSION_DENIED naming",
+  "the missing scope — adjust your plan and tell the user how to grant",
+  "it (QuestDB console footer → MCP popover). Do NOT retry blindly.",
+  "",
+  "═══════════════════════════════════════════════════════════════════",
+  "",
   "Tool surface: the two pairing tools (get_pairing_credentials,",
   "wait_for_pairing) plus a catalog of functional tools, all visible from",
   "`tools/list` from the very first request. Functional tools require a",
@@ -110,7 +145,9 @@ const SERVER_INSTRUCTIONS = [
 ].join("\n")
 
 type PairingHandlers = {
-  handleConnectWebConsole: () => ToolResultPayload
+  handleConnectWebConsole: (
+    args?: Record<string, unknown>,
+  ) => Promise<ToolResultPayload>
   handleWaitForPairing: (
     args: { timeout_ms?: number } | undefined,
   ) => Promise<ToolResultPayload>
@@ -137,7 +174,7 @@ export const dispatchToolCall = async (
     if (isPairingToolName(name)) {
       result =
         name === "get_pairing_credentials"
-          ? pairing.handleConnectWebConsole()
+          ? await pairing.handleConnectWebConsole(args)
           : await pairing.handleWaitForPairing(args)
     } else {
       result = await session.callBrowserTool(name, args, signal)
@@ -179,11 +216,13 @@ export const dispatchToolCall = async (
 type StartMcpServerArgs = {
   session: BridgeSession
   log?: Log
+  ensureListening: () => Promise<void>
 }
 
 export const startMcpServer = async ({
   session,
   log,
+  ensureListening,
 }: StartMcpServerArgs) => {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -198,8 +237,10 @@ export const startMcpServer = async ({
   )
 
   const pairingCtx: PairingToolsContext = {
+    ensureListening,
     buildDeepLink: () => session.buildDeepLink(),
     getCredentials: () => session.getCredentials(),
+    openBrowser: (url) => openInBrowser(url, log),
     getPairingState: () => session.getPairingSnapshot(),
     waitForPair: (timeoutMs) => {
       return session.waitForPair(timeoutMs).then((snap) => {

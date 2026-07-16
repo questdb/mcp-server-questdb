@@ -13,9 +13,12 @@ export type BridgeEnv = {
 export type AgentConfig = {
   id: AgentId
   displayName: string
-  format: "json" | "toml"
+  // "json": we edit the config file directly (comment-preserving).
+  // "codex-cli": the agent's own CLI owns its config; we shell out to it.
+  format: "json" | "codex-cli"
   configPaths: string[]
   configKey: string
+  envKey: "env" | "environment"
   buildEntry: (env: BridgeEnv) => Record<string, unknown>
   detectPaths: string[]
 }
@@ -39,6 +42,9 @@ const claudeGlobalConfigPath = (): string =>
     ? join(claudeConfigDir(), ".claude.json")
     : join(homedir(), ".claude.json")
 
+const codexHome = (): string =>
+  process.env.CODEX_HOME || join(homedir(), ".codex")
+
 const jsonStdioEntry = (env: BridgeEnv): Record<string, unknown> => ({
   command: "npx",
   args: [...NPX_ARGS],
@@ -52,21 +58,25 @@ export const buildAgents = (): Record<AgentId, AgentConfig> => ({
     format: "json",
     configPaths: [claudeGlobalConfigPath()],
     configKey: "mcpServers",
+    envKey: "env",
     buildEntry: jsonStdioEntry,
     detectPaths: [claudeGlobalConfigPath(), claudeConfigDir()],
   },
   codex: {
     id: "codex",
     displayName: "Codex",
-    format: "toml",
-    configPaths: [join(homedir(), ".codex", "config.toml")],
+    // config.toml is written by `codex mcp add`, never by us; configPaths is
+    // only the display path in reports. Honors CODEX_HOME like codex does.
+    format: "codex-cli",
+    configPaths: [join(codexHome(), "config.toml")],
     configKey: "mcp_servers",
+    envKey: "env",
     buildEntry: (env) => ({
       command: "npx",
       args: [...NPX_ARGS],
       ...(hasEnv(env) ? { env } : {}),
     }),
-    detectPaths: [join(homedir(), ".codex")],
+    detectPaths: [codexHome()],
   },
   cursor: {
     id: "cursor",
@@ -74,6 +84,7 @@ export const buildAgents = (): Record<AgentId, AgentConfig> => ({
     format: "json",
     configPaths: [join(homedir(), ".cursor", "mcp.json")],
     configKey: "mcpServers",
+    envKey: "env",
     buildEntry: jsonStdioEntry,
     detectPaths: [join(homedir(), ".cursor")],
   },
@@ -89,6 +100,7 @@ export const buildAgents = (): Record<AgentId, AgentConfig> => ({
       join(homedir(), ".config", "opencode", ".opencode.jsonc"),
     ],
     configKey: "mcp",
+    envKey: "environment",
     buildEntry: (env) => ({
       type: "local",
       command: ["npx", ...NPX_ARGS],
@@ -103,6 +115,7 @@ export const buildAgents = (): Record<AgentId, AgentConfig> => ({
     format: "json",
     configPaths: [join(homedir(), ".gemini", "settings.json")],
     configKey: "mcpServers",
+    envKey: "env",
     buildEntry: jsonStdioEntry,
     detectPaths: [join(homedir(), ".gemini")],
   },

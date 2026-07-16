@@ -7,6 +7,7 @@ afterEach(() => {
 
 const defaults = {
   log: () => {},
+  settleWs: () => Promise.resolve(),
   stepBudgetMs: 2_000,
   hardBudgetMs: 5_000,
 }
@@ -74,6 +75,33 @@ describe("createShutdownController", () => {
     await controller.shutdown()
 
     // Then it still exits cleanly
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it("closes a WS server that finishes binding during shutdown", async () => {
+    // A shutdown racing the first pairing: getStopWs() is null until the
+    // in-flight bind resolves. settleWs awaits that bind, after which getStopWs
+    // returns the freshly-bound server so it actually gets closed.
+    const exit = vi.fn()
+    const stopWs = vi.fn(() => Promise.resolve())
+    let bound: (() => Promise<void>) | null = null
+    const settleWs = vi.fn(() => {
+      bound = stopWs // the bind completed mid-shutdown
+      return Promise.resolve()
+    })
+    const controller = createShutdownController({
+      ...defaults,
+      stopMcp: () => Promise.resolve(),
+      settleWs,
+      getStopWs: () => bound,
+      exit,
+    })
+
+    await controller.shutdown()
+
+    // settle ran before getStopWs, so the mid-bind socket was observed + closed.
+    expect(settleWs).toHaveBeenCalledTimes(1)
+    expect(stopWs).toHaveBeenCalledTimes(1)
     expect(exit).toHaveBeenCalledWith(0)
   })
 
