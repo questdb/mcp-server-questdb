@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { findFreePort, generateToken } from "./sessionStore.js"
 import { BridgeSession } from "./bridgeSession.js"
+import { BRIDGE_PACKAGE } from "./bridgePackage.js"
 import { MCP_BRIDGE_VERSION } from "./protocolVersion.js"
 import {
   startWsServer,
@@ -43,14 +44,14 @@ const PER_TOOL_TIMEOUT_MS: Record<string, number> = {
   get_recent_user_actions: 15_000,
 }
 
-const USAGE = `@questdb/mcp-bridge — bridge coding agents to a running QuestDB Web Console.
+const USAGE = `${BRIDGE_PACKAGE} — bridge coding agents to a running QuestDB Web Console.
 
 Usage:
-  npx @questdb/mcp-bridge [start]    Start the bridge (default when no command is given)
-  npx @questdb/mcp-bridge setup      Configure the bridge for your coding agents (interactive)
-  npx @questdb/mcp-bridge upgrade    Re-pin existing coding-agent configs to this version
-  npx @questdb/mcp-bridge --version  Print the version and exit
-  npx @questdb/mcp-bridge --help     Print this help and exit
+  npx ${BRIDGE_PACKAGE} [start]    Start the bridge (default when no command is given)
+  npx ${BRIDGE_PACKAGE} setup      Configure the bridge for your coding agents (interactive)
+  npx ${BRIDGE_PACKAGE} upgrade    Re-pin existing coding-agent configs to this version
+  npx ${BRIDGE_PACKAGE} --version  Print the version and exit
+  npx ${BRIDGE_PACKAGE} --help     Print this help and exit
 `
 
 // Synchronous, best-effort writes to a standard fd.
@@ -155,7 +156,7 @@ const main = async () => {
 
   const mcp = await startMcpServer({ session, log, ensureListening })
 
-  log("INFO", `@questdb/mcp-bridge v${MCP_BRIDGE_VERSION}`)
+  log("INFO", `${BRIDGE_PACKAGE} v${MCP_BRIDGE_VERSION}`)
   log("INFO", `ws server: deferred until first pairing`)
   log("INFO", `console origin: ${consoleOrigin}`)
   log("INFO", `log file: ${logger.getFilePath() ?? "(disabled — stderr only)"}`)

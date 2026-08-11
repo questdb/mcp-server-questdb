@@ -13,7 +13,7 @@ import {
 } from "../setup/codexCli.js"
 import { describeOldPin, upgradeAgent } from "../setup/runUpgrade.js"
 
-const SPEC = `@questdb/mcp-bridge@${MCP_BRIDGE_VERSION}`
+const SPEC = `@questdb/mcp-server-questdb@${MCP_BRIDGE_VERSION}`
 const agents = buildAgents()
 
 const tmpPath = (name: string, content?: string): string => {
@@ -41,6 +41,9 @@ describe("parseCli — upgrade", () => {
 
 describe("describeOldPin", () => {
   it.each([
+    ['"@questdb/mcp-server-questdb@0.3.0"', "0.3.0"],
+    ['"@questdb/mcp-server-questdb"', "unpinned"],
+    // legacy-name pins predate the 0.3.0 rename and must stay recognized
     ['"@questdb/mcp-bridge@0.1.0"', "0.1.0"],
     ['"@questdb/mcp-bridge@^0.1.0"', "^0.1.0"],
     // a spec corrupted by a past partial rewrite still reports what was there

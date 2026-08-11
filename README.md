@@ -1,4 +1,9 @@
-# `@questdb/mcp-bridge`
+# `@questdb/mcp-server-questdb`
+
+> Formerly published as `@questdb/mcp-bridge`. Every release from 0.3.0 on is
+> published under both names, so existing configs keep working. On an old
+> install, run `npx @questdb/mcp-bridge upgrade` once — it migrates your
+> agent configs to the new name.
 
 An MCP server that connects coding agents (Claude Code, Codex, Cursor, OpenCode …) to a
 running QuestDB Web Console. The agent gets tools to create notebook
@@ -13,7 +18,7 @@ The interactive wizard detects your installed coding agents and
 writes the bridge into each one's MCP config:
 
 ```bash
-npx @questdb/mcp-bridge setup
+npx @questdb/mcp-server-questdb setup
 ```
 
 It walks you through two steps:
@@ -25,7 +30,7 @@ It walks you through two steps:
 
 The wizard pins each agent's config to the bridge version that ran it. Your
 QuestDB Web Console expects a specific bridge version. If you're on an older
-console, run the matching version: `npx @questdb/mcp-bridge@<version> setup`. The config it writes will launch that same version. (When unsure, pair first; on a version mismatch the agent is told which version to switch to.)
+console, run the matching version: `npx @questdb/mcp-server-questdb@<version> setup`. The config it writes will launch that same version. (When unsure, pair first; on a version mismatch the agent is told which version to switch to.)
 
 ### Manual setup
 
@@ -36,7 +41,7 @@ Or add it to your MCP client's config by hand (e.g. `~/.claude/.mcp.json`):
   "mcpServers": {
     "questdb": {
       "command": "npx",
-      "args": ["-y", "@questdb/mcp-bridge"]
+      "args": ["-y", "@questdb/mcp-server-questdb"]
     }
   }
 }
@@ -59,15 +64,15 @@ rarely invoke it by hand. When you do:
 
 | Command                             | Description                              |
 | ----------------------------------- | ---------------------------------------- |
-| `npx @questdb/mcp-bridge` (no args) | Start the bridge — same as `start`.      |
-| `npx @questdb/mcp-bridge start`     | Start the bridge.                        |
-| `npx @questdb/mcp-bridge setup`     | Interactively configure the bridge for your coding agents. |
-| `npx @questdb/mcp-bridge --version` | Print the version and exit. Alias: `-v`. |
-| `npx @questdb/mcp-bridge --help`    | Print this help and exit. Alias: `-h`.   |
+| `npx @questdb/mcp-server-questdb` (no args) | Start the bridge — same as `start`.      |
+| `npx @questdb/mcp-server-questdb start`     | Start the bridge.                        |
+| `npx @questdb/mcp-server-questdb setup`     | Interactively configure the bridge for your coding agents. |
+| `npx @questdb/mcp-server-questdb --version` | Print the version and exit. Alias: `-v`. |
+| `npx @questdb/mcp-server-questdb --help`    | Print this help and exit. Alias: `-h`.   |
 
 An unknown command exits non-zero with a short error. Pin a version with
-`npx @questdb/mcp-bridge@0.1.0 start`. (Installed on your `PATH`, the
-executable is named `questdb-mcp-bridge`.)
+`npx @questdb/mcp-server-questdb@0.3.0 start`. (Installed on your `PATH`, the
+executable is named `mcp-server-questdb`.)
 
 
 ## Pairing

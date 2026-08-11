@@ -1,10 +1,9 @@
-import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
 import {
   BRIDGE_PACKAGE,
-  buildAgents,
-  SERVER_NAME,
-  type AgentConfig,
-} from "./agents.js"
+  LEGACY_BRIDGE_PACKAGE,
+} from "../bridgePackage.js"
+import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
+import { buildAgents, SERVER_NAME, type AgentConfig } from "./agents.js"
 import { resolveConfigPath } from "./applyConfig.js"
 import {
   execCodex,
@@ -30,12 +29,16 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 // "0.2.0@^0.1.0"), "unpinned" when the package appears without a version (bare
 // npx spec, node_modules path of a global install), null when the entry never
 // references the bridge at all.
+const PINNABLE_PACKAGES = [BRIDGE_PACKAGE, LEGACY_BRIDGE_PACKAGE]
+
 export const describeOldPin = (entryText: string): string | null => {
-  const m = new RegExp(`${escapeRe(BRIDGE_PACKAGE)}@([^\\s"'\\]]+)`).exec(
-    entryText,
-  )
-  if (m) return m[1]
-  return entryText.includes(BRIDGE_PACKAGE) ? "unpinned" : null
+  for (const pkg of PINNABLE_PACKAGES) {
+    const m = new RegExp(`${escapeRe(pkg)}@([^\\s"'\\]]+)`).exec(entryText)
+    if (m) return m[1]
+  }
+  return PINNABLE_PACKAGES.some((pkg) => entryText.includes(pkg))
+    ? "unpinned"
+    : null
 }
 
 type ExistingEntry = { text: string; env?: Record<string, string> }
@@ -184,7 +187,7 @@ export const runUpgrade = async (): Promise<number> => {
   const target = MCP_BRIDGE_VERSION
   const agents = buildAgents()
   console.log(
-    `@questdb/mcp-bridge upgrade — pinning coding-agent configs to v${target}\n`,
+    `${BRIDGE_PACKAGE} upgrade — pinning coding-agent configs to v${target}\n`,
   )
 
   const reported: string[] = []
@@ -211,7 +214,7 @@ export const runUpgrade = async (): Promise<number> => {
   if (reported.length === 0) {
     console.log(
       `  No coding-agent config has a "questdb" MCP server.\n` +
-        `  Run \`npx @questdb/mcp-bridge@${target} setup\` to configure one.`,
+        `  Run \`npx ${BRIDGE_PACKAGE}@${target} setup\` to configure one.`,
     )
   } else {
     console.log(reported.join("\n"))

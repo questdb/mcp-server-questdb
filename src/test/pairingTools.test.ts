@@ -251,7 +251,7 @@ describe("get_pairing_credentials handler", () => {
     expect(parsed.reason).toBe("incompatible_bridge")
     expect(parsed.userMessage as string).toContain("v1.4.0")
     expect(parsed.userMessage as string).toContain(
-      "npx @questdb/mcp-bridge@2.0.0 upgrade",
+      "npx @questdb/mcp-server-questdb@2.0.0 upgrade",
     )
     expect(Array.isArray(parsed.assistantNextActions)).toBe(true)
   })
@@ -447,7 +447,7 @@ describe("wait_for_pairing handler", () => {
     expect(parsed.paired).toBe(false)
     expect(parsed.reason).toBe("incompatible_bridge")
     expect(parsed.userMessage as string).toContain(
-      "npx @questdb/mcp-bridge@2.0.0 upgrade",
+      "npx @questdb/mcp-server-questdb@2.0.0 upgrade",
     )
   })
 

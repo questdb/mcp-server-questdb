@@ -20,7 +20,7 @@ import { openInBrowser } from "./openBrowser.js"
 import type { BridgeSession } from "./bridgeSession.js"
 import type { Log, ToolResultPayload } from "./types.js"
 
-const SERVER_NAME = "questdb-mcp-bridge"
+const SERVER_NAME = "mcp-server-questdb"
 const SERVER_VERSION = MCP_BRIDGE_VERSION
 
 export const safePairingCredentialsSummary = (

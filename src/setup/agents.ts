@@ -1,5 +1,6 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { BRIDGE_PACKAGE } from "../bridgePackage.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
 
 export type AgentId = "claude" | "codex" | "cursor" | "opencode" | "gemini"
@@ -23,11 +24,10 @@ export type AgentConfig = {
   detectPaths: string[]
 }
 
-export const BRIDGE_PACKAGE = "@questdb/mcp-bridge"
 export const SERVER_NAME = "questdb"
 // Pin the spawned bridge to the version that ran setup: a console expects a
-// specific bridge version, so `npx @questdb/mcp-bridge@X setup` must write a
-// config that launches @X (not whatever "latest" later resolves to).
+// specific bridge version, so `npx @questdb/mcp-server-questdb@X setup` must
+// write a config that launches @X (not whatever "latest" later resolves to).
 export const BRIDGE_PACKAGE_SPEC = `${BRIDGE_PACKAGE}@${MCP_BRIDGE_VERSION}`
 const NPX_ARGS = ["-y", BRIDGE_PACKAGE_SPEC]
 
