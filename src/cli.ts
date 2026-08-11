@@ -1,6 +1,7 @@
 // CLI argument and environment parsing, factored out of index.ts so the
 // branching (exit codes, --version/--help, port validation) is unit-testable
 // without importing index.ts — whose module load starts the whole bridge.
+import { BRIDGE_PACKAGE } from "./bridgePackage.js"
 
 export type CliOutcome =
   | { kind: "start" }
@@ -36,8 +37,8 @@ export const parseCli = (
     kind: "exit",
     code: 2,
     stderr:
-      `@questdb/mcp-bridge: unknown command '${command}'.\n` +
-      `Run 'npx @questdb/mcp-bridge --help' for usage.\n`,
+      `${BRIDGE_PACKAGE}: unknown command '${command}'.\n` +
+      `Run 'npx ${BRIDGE_PACKAGE} --help' for usage.\n`,
   }
 }
 

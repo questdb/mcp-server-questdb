@@ -1,30 +1,31 @@
 {
-  "name": "@questdb/mcp-bridge",
-  "version": "0.2.0",
-  "description": "MCP bridge that exposes the QuestDB Web Console notebook to external coding agents (Claude Code, Codex) over a local WebSocket.",
+  "name": "@questdb/mcp-server-questdb",
+  "version": "0.3.0",
+  "mcpName": "io.github.questdb/mcp-server-questdb",
+  "description": "QuestDB MCP server that exposes the QuestDB Web Console notebook to coding agents (Claude Code, Codex) over a local WebSocket.",
   "license": "Apache-2.0",
   "author": "QuestDB",
-  "homepage": "https://github.com/questdb/mcp-bridge",
+  "homepage": "https://github.com/questdb/mcp-server-questdb",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/questdb/mcp-bridge.git"
+    "url": "git+https://github.com/questdb/mcp-server-questdb.git"
   },
   "bugs": {
-    "url": "https://github.com/questdb/mcp-bridge/issues"
+    "url": "https://github.com/questdb/mcp-server-questdb/issues"
   },
   "keywords": [
     "mcp",
+    "mcp-server",
     "questdb",
     "claude",
     "codex",
     "model-context-protocol",
+    "time-series",
     "notebook",
     "sql"
   ],
   "type": "module",
-  "bin": {
-    "questdb-mcp-bridge": "./dist/index.js"
-  },
+  "bin": "./dist/index.js",
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && cp -R src/consts dist/consts && chmod +x dist/index.js",
     "test": "vitest run",

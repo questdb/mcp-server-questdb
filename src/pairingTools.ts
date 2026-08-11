@@ -1,3 +1,4 @@
+import { bridgePackageForVersion } from "./bridgePackage.js"
 import type { MCPPermissions, ToolResultPayload, ToolSchema } from "./types.js"
 
 export const CONNECT_TOOL: ToolSchema = {
@@ -55,8 +56,8 @@ export const WAIT_TOOL: ToolSchema = {
     "If the bridge version doesn't match what the web console expects, " +
     "the success payload includes a `warning`, a pre-rendered `userMessage`, " +
     "and `assistantNextActions`; you MUST show the `userMessage` to the user " +
-    "verbatim AND suggest running the `npx @questdb/mcp-bridge@<version> " +
-    "upgrade` command (offer to run it for them) before proceeding. " +
+    "verbatim AND suggest running the exact `npx … upgrade` command it " +
+    "contains (offer to run it for them) before proceeding. " +
     "If pairing is refused outright for an incompatible bridge, the result " +
     "is `{paired:false, reason:'incompatible_bridge', userMessage, " +
     "assistantNextActions}` — show the `userMessage` verbatim and STOP " +
@@ -137,11 +138,15 @@ const RECOMMENDED_MAX_RETRIES = 10
 // pattern as get_pairing_credentials' `userMessage`. `expectedBridgeVersion` is
 // the exact npm version the console was verified against, so it doubles as the
 // pin to install.
-const buildVersionUserMessage = (m: VersionMismatch): string =>
-  `Web Console expects @questdb/mcp-bridge v${m.expectedBridgeVersion} but ` +
-  `you're running v${m.bridgeVersion}. Run ` +
-  `\`npx @questdb/mcp-bridge@${m.expectedBridgeVersion} upgrade\`, then restart ` +
-  `this coding agent (the running bridge keeps the old version until restart).`
+const buildVersionUserMessage = (m: VersionMismatch): string => {
+  const pkg = bridgePackageForVersion(m.expectedBridgeVersion)
+  return (
+    `Web Console expects ${pkg} v${m.expectedBridgeVersion} but ` +
+    `you're running v${m.bridgeVersion}. Run ` +
+    `\`npx ${pkg}@${m.expectedBridgeVersion} upgrade\`, then restart ` +
+    `this coding agent (the running bridge keeps the old version until restart).`
+  )
+}
 
 const buildVersionWarning = (m: VersionMismatch): string =>
   `version_mismatch (bridge v${m.bridgeVersion} vs console-expected ` +
@@ -152,7 +157,7 @@ const buildVersionWarning = (m: VersionMismatch): string =>
 // they MUST tell the user and MUST surface the `upgrade` command as a suggestion.
 const buildVersionMismatchActions = (m: VersionMismatch): string[] => [
   "You MUST show the `userMessage` text to the user verbatim — they need to know the bridge is out of date.",
-  `You MUST suggest running \`npx @questdb/mcp-bridge@${m.expectedBridgeVersion} upgrade\` and offer to run it for them — it re-pins your coding-agent config to the matching bridge version.`,
+  `You MUST suggest running \`npx ${bridgePackageForVersion(m.expectedBridgeVersion)}@${m.expectedBridgeVersion} upgrade\` and offer to run it for them — it re-pins your coding-agent config to the matching bridge version.`,
   "After it succeeds, tell the user to restart this coding agent so the upgraded bridge launches (the running process stays on the old version until restart).",
 ]
 
@@ -179,7 +184,7 @@ const buildIncompatiblePayload = (inc: VersionMismatch): ToolResultPayload => ({
         userMessage: buildVersionUserMessage(inc),
         assistantNextActions: [
           "Show the `userMessage` text to the user verbatim.",
-          `Offer to run \`npx @questdb/mcp-bridge@${inc.expectedBridgeVersion} upgrade\` for them — it re-pins your coding-agent config to the matching bridge version.`,
+          `Offer to run \`npx ${bridgePackageForVersion(inc.expectedBridgeVersion)}@${inc.expectedBridgeVersion} upgrade\` for them — it re-pins your coding-agent config to the matching bridge version.`,
           "After it succeeds, have them restart this coding agent so the new bridge launches.",
           "Stop calling wait_for_pairing — pairing cannot succeed until the bridge version is updated.",
         ],

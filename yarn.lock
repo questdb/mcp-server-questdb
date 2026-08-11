@@ -643,9 +643,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@questdb/mcp-bridge@workspace:.":
+"@questdb/mcp-server-questdb@workspace:.":
   version: 0.0.0-use.local
-  resolution: "@questdb/mcp-bridge@workspace:."
+  resolution: "@questdb/mcp-server-questdb@workspace:."
   dependencies:
     "@eslint/js": "npm:^10.0.0"
     "@inquirer/core": "npm:^11.2.1"
@@ -666,7 +666,7 @@ __metadata:
     ws: "npm:^8.21.0"
     zod: "npm:^3.25.0"
   bin:
-    questdb-mcp-bridge: ./dist/index.js
+    mcp-server-questdb: ./dist/index.js
   languageName: unknown
   linkType: soft
 

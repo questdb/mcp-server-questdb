@@ -1,8 +1,25 @@
 # Changelog
 
-All notable changes to `@questdb/mcp-bridge` are documented here. The
-format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
-and this project adheres to [Semantic Versioning](https://semver.org/).
+All notable changes to `@questdb/mcp-server-questdb` (formerly
+`@questdb/mcp-bridge`) are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
+adheres to [Semantic Versioning](https://semver.org/).
+
+## 0.3.0 - 2026-08-11
+### Changed
+
+- Renamed the package to `@questdb/mcp-server-questdb`. Every release from
+  0.3.0 on is published under both names with identical code, so commands
+  printed by shipped consoles keep resolving. Versions below 0.3.0 exist
+  only as `@questdb/mcp-bridge`, and rendered upgrade commands for those
+  versions keep using the old name.
+- `setup` and `upgrade` now pin agent configs to
+  `@questdb/mcp-server-questdb`; `upgrade` still recognizes old-name pins
+  and rewrites them.
+- Renamed the executable to `mcp-server-questdb` (was `questdb-mcp-bridge`).
+- Added the `mcpName` field for the official MCP Registry.
+- The config key (`questdb`), the `MCP_BRIDGE_PORT` variable, and the log
+  directory are unchanged.
 
 ## 0.2.0 - 2026-07-23
 ### Added

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.questdb/mcp-server-questdb",
+  "title": "QuestDB Web Console MCP Server",
+  "description": "Connects coding agents to a running QuestDB Web Console: notebook cells, SQL queries, and charts.",
+  "websiteUrl": "https://questdb.com",
+  "repository": {
+    "url": "https://github.com/questdb/mcp-server-questdb",
+    "source": "github"
+  },
+  "version": "0.3.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@questdb/mcp-server-questdb",
+      "version": "0.3.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CONSOLE_ORIGIN",
+          "description": "QuestDB Web Console origin.",
+          "format": "string",
+          "default": "http://127.0.0.1:9000"
+        },
+        {
+          "name": "MCP_BRIDGE_PORT",
+          "description": "Fixed WebSocket port for pairing. Auto-allocated when unset.",
+          "format": "number"
+        },
+        {
+          "name": "LOG_PATH",
+          "description": "Log file location. Defaults to a timestamped file under /tmp/questdb-mcp-bridge.",
+          "format": "filepath"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "description": "Log verbosity. DEBUG adds heartbeats and full tool payloads.",
+          "format": "string",
+          "choices": ["ERROR", "WARN", "INFO", "DEBUG"],
+          "default": "INFO"
+        }
+      ]
+    }
+  ]
+}

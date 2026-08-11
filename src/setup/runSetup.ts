@@ -1,6 +1,7 @@
 // Two-screen wizard: pick agents, then review env vars and confirm. Esc clears
 // the current field and, when already empty, steps back to the previous prompt.
 import { checkbox } from "@inquirer/prompts"
+import { BRIDGE_PACKAGE } from "../bridgePackage.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
 import { brand, gray, green, red, renderBanner } from "./banner.js"
 import { armFastEscape, BACK, confirmBack, text } from "./prompts.js"
@@ -96,7 +97,7 @@ const printReview = (
 export const runSetup = async (): Promise<number> => {
   if (!process.stdin.isTTY) {
     process.stderr.write(
-      "setup is interactive and needs a TTY. Run `npx @questdb/mcp-bridge setup` " +
+      `setup is interactive and needs a TTY. Run \`npx ${BRIDGE_PACKAGE} setup\` ` +
         "directly in a terminal.\n",
     )
     return 1
@@ -107,7 +108,7 @@ export const runSetup = async (): Promise<number> => {
   const agents = buildAgents()
   out("\n" + renderBanner() + "\n\n")
   out(
-    "  Configure @questdb/mcp-bridge as an MCP server for your coding agents " +
+    `  Configure ${BRIDGE_PACKAGE} as an MCP server for your coding agents ` +
       "to interact with QuestDB\n",
   )
   out(
