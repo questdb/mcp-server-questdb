@@ -2,6 +2,7 @@ name: Publish to MCP Registry
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   id-token: write
@@ -14,14 +15,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The registry pins exact versions; package.json is the single source of
+      # truth, so the checked-in server.json never needs a manual bump.
+      - name: Sync server.json version with package.json
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.json.tmp
+          mv server.json.tmp server.json
+
+      - name: Check if the registry already has this version
+        id: check
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          CURRENT=$(curl -s "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.questdb/mcp-server-questdb" | jq -r '.servers[0].server.version // empty')
+          if [ "$CURRENT" = "$VERSION" ]; then
+            echo "Registry already has $VERSION"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Install mcp-publisher
+        if: steps.check.outputs.exists == 'false'
         run: |
           curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
 
       # A workflow in this org's repo gets io.github.questdb/* publish rights
       # via OIDC; no personal login or org-owner account is involved.
       - name: Login with GitHub Actions OIDC
+        if: steps.check.outputs.exists == 'false'
         run: ./mcp-publisher login github-oidc
 
       - name: Publish
+        if: steps.check.outputs.exists == 'false'
         run: ./mcp-publisher publish

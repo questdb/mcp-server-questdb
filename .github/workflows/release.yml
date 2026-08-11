@@ -151,3 +151,13 @@ jobs:
             });
 
             console.log(`Created release v${version}`);
+
+  # Runs after npm publishing so the registry can validate the published
+  # tarball; skips by itself when the registry already has this version.
+  registry:
+    name: Publish to MCP Registry
+    needs: publish
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/mcp-registry.yml
