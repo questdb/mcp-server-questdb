@@ -61,6 +61,7 @@ describe("bundledTools", () => {
     expect(tool.inputSchema.required).toEqual([
       "buffer_id",
       "layout_mode",
+      "auto_refresh_default",
       "maximized_cell_id",
       "variables",
       "cells",
