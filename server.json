@@ -8,12 +8,12 @@
     "url": "https://github.com/questdb/mcp-server-questdb",
     "source": "github"
   },
-  "version": "0.3.0",
+  "version": "0.4.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@questdb/mcp-server-questdb",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
