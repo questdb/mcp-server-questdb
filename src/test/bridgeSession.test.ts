@@ -1076,6 +1076,38 @@ describe("BridgeSession — disconnect", () => {
     expect(res.paired).toBe(true)
   })
 
+  it("clears a cached incompatibility when credentials start a fresh attempt", () => {
+    const { session } = makeSession()
+    const rejected = makeFakeBrowser()
+    session.attachBrowser(rejected.conn)
+    sendHello(session, "the-token", helloTools, grantedPermissions, "999.0.0")
+    session.handleSocketClose(rejected.conn)
+    const before = session.getPairingSnapshot()
+    if (before.paired) throw new Error("expected unpaired")
+    expect(before.incompatible).toBeTruthy()
+
+    session.beginPairingAttempt()
+
+    const after = session.getPairingSnapshot()
+    if (after.paired) throw new Error("expected unpaired")
+    expect(after.incompatible).toBeUndefined()
+  })
+
+  it("clears a cached incompatibility as soon as a fresh browser is accepted", () => {
+    const { session } = makeSession()
+    const rejected = makeFakeBrowser()
+    session.attachBrowser(rejected.conn)
+    sendHello(session, "the-token", helloTools, grantedPermissions, "999.0.0")
+    session.handleSocketClose(rejected.conn)
+
+    const fresh = makeFakeBrowser()
+    expect(session.attachBrowser(fresh.conn)).toBe("accepted")
+
+    const duringHello = session.getPairingSnapshot()
+    if (duringHello.paired) throw new Error("expected unpaired handshake")
+    expect(duringHello.incompatible).toBeUndefined()
+  })
+
   it("ignores a stale close from a previously-replaced browser", () => {
     const { session } = makeSession()
     const a = makeFakeBrowser()

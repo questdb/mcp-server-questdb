@@ -33,14 +33,25 @@ export const selfPath = (
     ? resolve(argv1)
     : fileURLToPath(import.meta.url)
 
-// Quote a filesystem path for a shell command rendered into user- and
-// agent-facing text (never executed by us). POSIX single-quoting neutralizes
-// $, backtick, spaces and the rest; Windows uses the same double-quote +
-// %-doubling scheme as codex config writing (setup/codexCli winQuote), since a
-// standalone user runs the rendered command on the same platform as the bridge.
-export const commandArg = (value: string): string =>
-  process.platform === "win32"
-    ? `"${value.replace(/%/g, "%%").replace(/"/g, '\\"')}"`
+// User-facing commands target one explicit shell. Windows instructions target
+// PowerShell, whose single-quoted strings are verbatim; doubling an embedded
+// apostrophe preserves it. This prevents legal path text such as `$()` from
+// being evaluated. POSIX shells use the standard close/escape/reopen form.
+export type CommandShell = "posix" | "powershell"
+
+export const commandShell = (): CommandShell =>
+  process.platform === "win32" ? "powershell" : "posix"
+
+export const commandShellLabel = (
+  shell: CommandShell = commandShell(),
+): string => (shell === "powershell" ? "PowerShell" : "a POSIX shell")
+
+export const commandArg = (
+  value: string,
+  shell: CommandShell = commandShell(),
+): string =>
+  shell === "powershell"
+    ? `'${value.replace(/'/g, "''")}'`
     : `'${value.replace(/'/g, `'\\''`)}'`
 
 export type LaunchSpec = { command: string; args: string[] }
@@ -85,6 +96,7 @@ export const bundleInstallPath = (
 export const setupCommand = (
   version: string = MCP_BRIDGE_VERSION,
   channel: DistributionChannel = DISTRIBUTION_CHANNEL,
+  shell: CommandShell = commandShell(),
 ): string => {
   const target = requireBridgeVersion(version)
   return channel === "standalone"
@@ -92,6 +104,7 @@ export const setupCommand = (
         target === MCP_BRIDGE_VERSION
           ? selfPath(channel)
           : bundleInstallPath(target, channel),
+        shell,
       )} setup`
     : `npx ${bridgePackageForVersion(target)}@${target} setup`
 }

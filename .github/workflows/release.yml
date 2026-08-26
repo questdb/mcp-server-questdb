@@ -70,6 +70,7 @@ jobs:
     concurrency:
       group: release-${{ github.repository }}-v${{ needs.verify.outputs.version }}
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     outputs:
@@ -310,6 +311,7 @@ jobs:
     concurrency:
       group: release-${{ github.repository }}-v${{ needs.prepare_github_release.outputs.version }}
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:
@@ -358,6 +360,7 @@ jobs:
     concurrency:
       group: release-${{ github.repository }}-v${{ needs.prepare_github_release.outputs.version }}
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:
@@ -458,6 +461,7 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
+      release_sha: ${{ needs.prepare_github_release.outputs.release_sha }}
       primary_exists: ${{ steps.check.outputs.primary_exists }}
       legacy_exists: ${{ steps.check.outputs.legacy_exists }}
     steps:
@@ -540,6 +544,10 @@ jobs:
     name: Publish to NPM
     needs: npm_build
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.repository }}-v${{ needs.npm_build.outputs.version }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       id-token: write
@@ -555,18 +563,67 @@ jobs:
           name: npm-packages-${{ needs.npm_build.outputs.version }}
           path: npm-artifacts
 
+      # npm_build is intentionally read-only and may overlap another run. Once
+      # this job owns the version-scoped mutation lock, refresh registry state
+      # so a package published by the preceding queued run becomes a no-op.
+      - name: Recheck published versions
+        id: publish-check
+        if: needs.npm_build.outputs.primary_exists == 'false' || needs.npm_build.outputs.legacy_exists == 'false'
+        env:
+          VERSION: ${{ needs.npm_build.outputs.version }}
+        run: |
+          check_package() {
+            package="$1"
+            output_name="$2"
+            if output=$(npm view "$package@$VERSION" version 2>&1); then
+              printf '%s\n' "$output"
+              echo "$output_name=true" >> "$GITHUB_OUTPUT"
+            elif printf '%s\n' "$output" | grep -q 'E404'; then
+              echo "$package@$VERSION is not published"
+              echo "$output_name=false" >> "$GITHUB_OUTPUT"
+            else
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+          }
+          check_package "@questdb/mcp-server-questdb" primary_exists
+          check_package "@questdb/mcp-bridge" legacy_exists
+
+      # npm provenance is bound to the triggering workflow's immutable source
+      # context, not to the ref used by npm_build's checkout. A recovery run
+      # from a later master commit must therefore stop before publishing and be
+      # re-dispatched at the release tag.
+      - name: Verify provenance source
+        if: steps.publish-check.outputs.primary_exists == 'false' || steps.publish-check.outputs.legacy_exists == 'false'
+        env:
+          RELEASE_SHA: ${{ needs.npm_build.outputs.release_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          VERSION: ${{ needs.npm_build.outputs.version }}
+        run: |
+          if [ "$WORKFLOW_SHA" != "$RELEASE_SHA" ]; then
+            echo "::error::Cannot publish npm v$VERSION from workflow SHA $WORKFLOW_SHA: the immutable release is at $RELEASE_SHA. Re-dispatch this workflow at tag v$VERSION so npm provenance identifies the packaged source."
+            exit 1
+          fi
+
       - name: Publish primary package
-        if: needs.npm_build.outputs.primary_exists == 'false'
+        if: steps.publish-check.outputs.primary_exists == 'false'
         run: npm publish npm-artifacts/primary/*.tgz --provenance --access public --ignore-scripts
 
       - name: Publish legacy package
-        if: needs.npm_build.outputs.legacy_exists == 'false'
+        if: steps.publish-check.outputs.legacy_exists == 'false'
         run: npm publish npm-artifacts/legacy/*.tgz --provenance --access public --ignore-scripts
 
   registry:
     name: Publish to MCP Registry
-    needs: npm_publish
+    needs: [npm_publish, prepare_github_release]
+    concurrency:
+      group: release-${{ github.repository }}-v${{ needs.prepare_github_release.outputs.version }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       id-token: write
       contents: read
     uses: ./.github/workflows/mcp-registry.yml
+    with:
+      release_sha: ${{ needs.prepare_github_release.outputs.release_sha }}
+      version: ${{ needs.prepare_github_release.outputs.version }}

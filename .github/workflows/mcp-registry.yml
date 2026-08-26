@@ -3,6 +3,15 @@ name: Publish to MCP Registry
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      release_sha:
+        description: Immutable release commit to publish metadata from
+        required: true
+        type: string
+      version:
+        description: Canonical release version expected at release_sha
+        required: true
+        type: string
 
 permissions:
   id-token: write
@@ -14,6 +23,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Validate release source
+        env:
+          EXPECTED_SHA: ${{ inputs.release_sha }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+        run: |
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          VERSION=$(node -p "require('./package.json').version")
+          if [ -n "$EXPECTED_SHA" ] && [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "::error::Checked out $ACTUAL_SHA; expected immutable release SHA $EXPECTED_SHA"
+            exit 1
+          fi
+          if [ -n "$EXPECTED_VERSION" ] && [ "$VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::package.json version $VERSION does not match release version $EXPECTED_VERSION"
+            exit 1
+          fi
 
       # The registry pins exact versions; package.json is the single source of
       # truth, so the checked-in server.json never needs a manual bump.

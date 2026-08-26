@@ -208,6 +208,15 @@ export class BridgeSession {
     }
   }
 
+  // An explicit credentials request starts a new pairing attempt. Keep a
+  // rejected console's mismatch long enough for wait_for_pairing to report it,
+  // but do not let that historical result block a later user-driven repair.
+  beginPairingAttempt(): void {
+    if (this.state === "S0" && !this.browser) {
+      this.incompatibleConsole = null
+    }
+  }
+
   getPairingSnapshot(): PairingSnapshot {
     if (this.state !== "S1" || !this.sessionId) {
       return this.incompatibleConsole
@@ -262,6 +271,10 @@ export class BridgeSession {
       }
       return "superseded"
     }
+    // No socket is currently attached, so this is a genuinely fresh browser,
+    // not a takeover of the live session above. Its hello must determine the
+    // current compatibility state instead of inheriting a rejected predecessor.
+    this.incompatibleConsole = null
     this.browser = conn
     this.connectingLastSessionId = lastSessionId
     this.armHelloTimer()

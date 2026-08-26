@@ -3,6 +3,8 @@ import {
   bundleDownloadUrl,
   bundleInstallPath,
   commandArg,
+  commandShell,
+  commandShellLabel,
   DISTRIBUTION_CHANNEL,
   type DistributionChannel,
 } from "./distribution.js"
@@ -129,6 +131,7 @@ export type WaitForPairResult =
   | { paired: false; reason: "incompatible"; incompatible: VersionMismatch }
 
 export type PairingToolsContext = {
+  beginPairingAttempt: () => void
   buildDeepLink: () => string
   getCredentials: () => { wsUrl: string; token: string }
   getPairingState: () => PairingSnapshot
@@ -142,6 +145,41 @@ const MAX_PAIRING_POLL_TIMEOUT_MS = 50_000
 const MIN_PAIRING_POLL_TIMEOUT_MS = 1_000
 const RECOMMENDED_MAX_RETRIES = 10
 
+type UpgradeCommand = {
+  command: string
+  args: string[]
+  shell: "posix" | "powershell"
+  rendered: string
+  downloadUrl?: string
+  installPath?: string
+}
+
+const buildUpgradeCommand = (
+  version: string,
+  channel: DistributionChannel,
+): UpgradeCommand => {
+  const target = requireBridgeVersion(version)
+  const shell = commandShell()
+  if (channel !== "standalone") {
+    const spec = `${bridgePackageForVersion(target)}@${target}`
+    return {
+      command: "npx",
+      args: [spec, "upgrade"],
+      shell,
+      rendered: `npx ${spec} upgrade`,
+    }
+  }
+  const installPath = bundleInstallPath(target, channel)
+  return {
+    command: "node",
+    args: [installPath, "upgrade"],
+    shell,
+    rendered: `node ${commandArg(installPath, shell)} upgrade`,
+    downloadUrl: bundleDownloadUrl(target),
+    installPath,
+  }
+}
+
 // The exact version-switch instruction for a target version, rendered per
 // distribution channel. The target bundle is saved beside the current durable
 // install.
@@ -149,13 +187,11 @@ const upgradeInstruction = (
   version: string,
   channel: DistributionChannel = DISTRIBUTION_CHANNEL,
 ): string => {
-  const target = requireBridgeVersion(version)
-  if (channel !== "standalone")
-    return `run \`npx ${bridgePackageForVersion(target)}@${target} upgrade\``
-  const installPath = bundleInstallPath(target, channel)
+  const upgrade = buildUpgradeCommand(version, channel)
+  if (channel !== "standalone") return `run \`${upgrade.rendered}\``
   return (
-    `download ${bundleDownloadUrl(target)} to ${installPath} and run ` +
-    `\`node ${commandArg(installPath)} upgrade\``
+    `download ${upgrade.downloadUrl} to ${upgrade.installPath} and in ` +
+    `${commandShellLabel(upgrade.shell)} run \`${upgrade.rendered}\``
   )
 }
 
@@ -208,6 +244,7 @@ const attachVersionMismatch = (
   payload.warning = buildVersionWarning(m, channel)
   payload.userMessage = buildVersionUserMessage(m, channel)
   payload.assistantNextActions = buildVersionMismatchActions(m, channel)
+  payload.upgradeCommand = buildUpgradeCommand(m.expectedBridgeVersion, channel)
 }
 
 // Returned when the console tried to pair but its expected bridge major differs
@@ -225,6 +262,7 @@ const buildIncompatiblePayload = (
         reason: "incompatible_bridge",
         warning: buildVersionWarning(inc, channel, false),
         userMessage: buildVersionUserMessage(inc, channel),
+        upgradeCommand: buildUpgradeCommand(inc.expectedBridgeVersion, channel),
         assistantNextActions: [
           "Show the `userMessage` text to the user verbatim.",
           `Suggest the version switch: ${upgradeInstruction(inc.expectedBridgeVersion, channel)} — offer to carry it out for them; it re-pins your coding-agent config to the matching bridge version.`,
@@ -270,10 +308,7 @@ export const createPairingToolHandlers = (
   const handleConnectWebConsole = async (
     args?: Record<string, unknown>,
   ): Promise<ToolResultPayload> => {
-    const state = ctx.getPairingState()
-    if (!state.paired && state.incompatible) {
-      return buildIncompatiblePayload(state.incompatible, channel)
-    }
+    let state = ctx.getPairingState()
     if (state.paired) {
       const payload: Record<string, unknown> = {
         paired: true,
@@ -288,6 +323,14 @@ export const createPairingToolHandlers = (
       return {
         content: [{ type: "text", text: JSON.stringify(payload) }],
       }
+    }
+    // Calling get_pairing_credentials is an explicit request to try again.
+    // Supersede a cached refusal from an already-closed console before minting
+    // and presenting credentials for the next browser.
+    ctx.beginPairingAttempt()
+    state = ctx.getPairingState()
+    if (!state.paired && state.incompatible) {
+      return buildIncompatiblePayload(state.incompatible, channel)
     }
     try {
       await ctx.ensureListening()

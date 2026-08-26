@@ -6,6 +6,7 @@ import {
   DISTRIBUTION_CHANNEL,
   selfPath,
   setupCommand,
+  commandShellLabel,
 } from "../distribution.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
 import { brand, gray, green, red, renderBanner } from "./banner.js"
@@ -110,7 +111,7 @@ export const runSetup = async (): Promise<number> => {
   if (!process.stdin.isTTY) {
     process.stderr.write(
       `setup is interactive and needs a TTY. Run \`${setupCommand()}\` ` +
-        "directly in a terminal.\n",
+        `directly in ${commandShellLabel()}.\n`,
     )
     return 1
   }

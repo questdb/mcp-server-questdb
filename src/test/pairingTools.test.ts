@@ -13,6 +13,7 @@ const PAIRING_TOOLS = [CONNECT_TOOL, WAIT_TOOL] as const
 const makeCtx = (
   overrides: Partial<PairingToolsContext> = {},
 ): PairingToolsContext => ({
+  beginPairingAttempt: () => {},
   buildDeepLink: () =>
     "http://127.0.0.1:9000/?mcp-pair=1&mcp-ws=ws://127.0.0.1:57123&mcp-token=abcdefghijklmnopqrst1234",
   getCredentials: () => ({
@@ -67,6 +68,39 @@ describe("PAIRING_TOOLS schema", () => {
 })
 
 describe("get_pairing_credentials handler", () => {
+  it("starts a fresh attempt instead of returning a cached incompatibility", async () => {
+    let incompatible = true
+    let listened = false
+    const { handleConnectWebConsole } = createPairingToolHandlers(
+      makeCtx({
+        beginPairingAttempt: () => {
+          incompatible = false
+        },
+        getPairingState: () =>
+          incompatible
+            ? {
+                paired: false,
+                incompatible: {
+                  bridgeVersion: "1.4.0",
+                  expectedBridgeVersion: "2.0.0",
+                },
+              }
+            : { paired: false },
+        ensureListening: () => {
+          listened = true
+          return Promise.resolve()
+        },
+      }),
+    )
+
+    const out = await handleConnectWebConsole({ auto_open_browser: false })
+    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    expect(out.isError).toBeFalsy()
+    expect(parsed.reason).not.toBe("incompatible_bridge")
+    expect(parsed.deepLink).toContain("mcp-pair=1")
+    expect(listened).toBe(true)
+  })
+
   it("returns paired:false JSON when unpaired (deepLink + wsUrl + token + nextStep, camelCase)", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(makeCtx())
     const out = await handleConnectWebConsole()
@@ -265,6 +299,10 @@ describe("get_pairing_credentials handler", () => {
       `node ${commandArg(bundleInstallPath("0.4.1", "standalone"))} upgrade`,
     )
     expect(parsed.userMessage as string).not.toContain("npx")
+    expect(parsed.upgradeCommand).toMatchObject({
+      command: "node",
+      args: [bundleInstallPath("0.4.1", "standalone"), "upgrade"],
+    })
     expect(
       (parsed.assistantNextActions as string[]).some((action) =>
         action.includes(expectedUrl),
@@ -299,6 +337,10 @@ describe("get_pairing_credentials handler", () => {
       `node ${commandArg(bundleInstallPath("0.2.0", "standalone"))} upgrade`,
     )
     expect(parsed.userMessage as string).not.toContain("npx")
+    expect(parsed.upgradeCommand).toMatchObject({
+      command: "node",
+      args: [bundleInstallPath("0.2.0", "standalone"), "upgrade"],
+    })
     expect(parsed.userMessage as string).not.toContain("check the releases")
   })
 
@@ -350,6 +392,10 @@ describe("get_pairing_credentials handler", () => {
       `node ${commandArg(bundleInstallPath("1.0.0", "standalone"))} upgrade`,
     )
     expect(parsed.userMessage as string).not.toContain("npx")
+    expect(parsed.upgradeCommand).toMatchObject({
+      command: "node",
+      args: [bundleInstallPath("1.0.0", "standalone"), "upgrade"],
+    })
     expect(parsed.warning as string).toContain("Pairing was refused")
     expect(parsed.warning as string).not.toContain(
       "existing tools keep working",

@@ -6,6 +6,7 @@ import {
   bundleInstallPath,
   bundleDownloadUrl,
   commandArg,
+  commandShellLabel,
   DISTRIBUTION_CHANNEL,
   hasStandaloneBundle,
   launchSpec,
@@ -287,21 +288,25 @@ describe("upgradeAgent — cross-channel PUT", () => {
 })
 
 describe("commandArg", () => {
-  it("quotes metacharacter paths for the running platform's shell", () => {
-    if (process.platform === "win32") {
-      expect(commandArg("C:\\Program Files\\q\\b.mjs")).toBe(
-        '"C:\\Program Files\\q\\b.mjs"',
-      )
-      expect(commandArg("C:\\x\\%USERNAME%\\b.mjs")).toBe(
-        '"C:\\x\\%%USERNAME%%\\b.mjs"',
-      )
-    } else {
-      expect(commandArg("/opt/q/b.mjs")).toBe("'/opt/q/b.mjs'")
-      expect(commandArg("/Users/a b/$(id -u)/b.mjs")).toBe(
-        "'/Users/a b/$(id -u)/b.mjs'",
-      )
-      expect(commandArg("/o'brien/b.mjs")).toBe("'/o'\\''brien/b.mjs'")
-    }
+  it("quotes metacharacter paths for POSIX shells", () => {
+    expect(commandArg("/opt/q/b.mjs", "posix")).toBe("'/opt/q/b.mjs'")
+    expect(commandArg("/Users/a b/$(id -u)/b.mjs", "posix")).toBe(
+      "'/Users/a b/$(id -u)/b.mjs'",
+    )
+    expect(commandArg("/o'brien/b.mjs", "posix")).toBe("'/o'\\''brien/b.mjs'")
+  })
+
+  it("renders Windows paths as literal PowerShell arguments", () => {
+    expect(commandArg("C:\\Program Files\\q\\b.mjs", "powershell")).toBe(
+      "'C:\\Program Files\\q\\b.mjs'",
+    )
+    expect(
+      commandArg("C:\\drop\\$(calc)\\%USERNAME%\\o'brien.mjs", "powershell"),
+    ).toBe("'C:\\drop\\$(calc)\\%USERNAME%\\o''brien.mjs'")
+    expect(commandShellLabel("powershell")).toBe("PowerShell")
+    expect(setupCommand("0.4.1", "standalone", "powershell")).toMatch(
+      /^node '.*mcp-server-questdb-0\.4\.1\.mjs' setup$/,
+    )
   })
 })
 
