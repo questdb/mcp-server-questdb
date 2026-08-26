@@ -16,10 +16,7 @@ import type {
   ToolSchema,
 } from "./types.js"
 import { WS_CLOSE_CODES } from "./types.js"
-import type {
-  PairingSnapshot,
-  VersionMismatch,
-} from "./pairingTools.js"
+import type { PairingSnapshot, VersionMismatch } from "./pairingTools.js"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 
 const HEARTBEAT_INTERVAL_MS = 5_000
@@ -67,7 +64,10 @@ type SessionState = "S0" | "S1"
 // (see rebuildToolValidators) so a prior console's schema cache can never leak
 // into a later one, and advertised schemas are sanitized first (see
 // sanitizeAdvertisedSchema).
-type ArgValidator = (input: unknown) => { valid: boolean; errorMessage?: string }
+type ArgValidator = (input: unknown) => {
+  valid: boolean
+  errorMessage?: string
+}
 
 // Schema keywords stripped from every advertised schema before compilation:
 //  - `$id`: the SDK validator caches compiled schemas by `$id` for the life of
@@ -386,7 +386,10 @@ export class BridgeSession {
     if (signal?.aborted) {
       return Promise.resolve({
         content: [
-          { type: "text", text: "cancelled: tool call cancelled before dispatch" },
+          {
+            type: "text",
+            text: "cancelled: tool call cancelled before dispatch",
+          },
         ],
         isError: true,
       })
@@ -510,10 +513,7 @@ export class BridgeSession {
     }
 
     if (this.state === "S1") {
-      this.closeBrowser(
-        WS_CLOSE_CODES.protocol_violation,
-        "duplicate_hello",
-      )
+      this.closeBrowser(WS_CLOSE_CODES.protocol_violation, "duplicate_hello")
       return
     }
     if (msg.token !== this.config.token) {
@@ -530,12 +530,15 @@ export class BridgeSession {
     }
 
     const expectedMajor = parseMajor(msg.expectedBridgeVersion)
+    if (expectedMajor === null) {
+      this.closeBrowser(
+        WS_CLOSE_CODES.protocol_violation,
+        "malformed_expected_bridge_version",
+      )
+      return
+    }
     const actualMajor = parseMajor(MCP_BRIDGE_VERSION)
-    if (
-      expectedMajor === null ||
-      actualMajor === null ||
-      expectedMajor !== actualMajor
-    ) {
+    if (actualMajor === null || expectedMajor !== actualMajor) {
       this.incompatibleConsole = {
         bridgeVersion: MCP_BRIDGE_VERSION,
         expectedBridgeVersion: msg.expectedBridgeVersion,
@@ -730,7 +733,11 @@ export class BridgeSession {
     this.browserTools = []
     this.toolValidators.clear()
     this.sessionId = null
-    this.incompatibleConsole = null
+    // incompatibleConsole is intentionally NOT cleared here: a major-version
+    // mismatch sets it and then closes the socket, which lands right back in
+    // this method. Clearing it would erase the refusal before the pairing tools
+    // could surface the upgrade message, leaving the agent with a bare timeout.
+    // It is cleared only on a successful hello (see handleHello).
     // In-flight calls survive the disconnect: the console flushes their
     // results after a reconnect hello_ack, and handleToolResult still finds
     // them by requestId. They are failed early only if the per-tool deadline
@@ -778,7 +785,11 @@ const clearInflight = (call: InflightCall): void => {
 
 const isValidToolList = (
   tools: unknown,
-): tools is { name: string; description?: unknown; inputSchema?: unknown }[] => {
+): tools is {
+  name: string
+  description?: unknown
+  inputSchema?: unknown
+}[] => {
   if (!Array.isArray(tools)) return false
   for (const t of tools) {
     if (

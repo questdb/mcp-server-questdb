@@ -3,6 +3,7 @@ import {
   codexNotFoundError,
   getCodexServer,
   isCodexNotFound,
+  isWindowsCommandNotFound,
   putCodexServer,
   sameCodexEntry,
   stringEnv,
@@ -43,7 +44,9 @@ const GET_JSON = JSON.stringify({
 
 describe("getCodexServer", () => {
   it("parses command, args, env, and keeps the transport text for reporting", async () => {
-    const { exec, calls } = fakeExec([{ code: 0, stdout: GET_JSON, stderr: "" }])
+    const { exec, calls } = fakeExec([
+      { code: 0, stdout: GET_JSON, stderr: "" },
+    ])
     const server = await getCodexServer("questdb", exec)
     expect(calls[0]).toEqual(["mcp", "get", "questdb", "--json"])
     expect(server).not.toBeNull()
@@ -90,13 +93,15 @@ describe("getCodexServer", () => {
 
 describe("putCodexServer", () => {
   it("builds the add argv: env flags, then `--`, then the launch command", async () => {
-    const { exec, calls } = fakeExec([{ code: 0, stdout: "Added\n", stderr: "" }])
+    const { exec, calls } = fakeExec([
+      { code: 0, stdout: "Added\n", stderr: "" },
+    ])
     await putCodexServer(
       "questdb",
       {
         command: "npx",
         args: ["-y", "@questdb/mcp-bridge@0.2.0"],
-        env: { CONSOLE_ORIGIN: "http://x", MCP_BRIDGE_PORT: "9009" },
+        env: { CONSOLE_ORIGIN: "http://x", MCP_BRIDGE_PORT: "9123" },
       },
       exec,
     )
@@ -107,7 +112,7 @@ describe("putCodexServer", () => {
       "--env",
       "CONSOLE_ORIGIN=http://x",
       "--env",
-      "MCP_BRIDGE_PORT=9009",
+      "MCP_BRIDGE_PORT=9123",
       "--",
       "npx",
       "-y",
@@ -116,7 +121,9 @@ describe("putCodexServer", () => {
   })
 
   it("omits env flags when the entry has no env", async () => {
-    const { exec, calls } = fakeExec([{ code: 0, stdout: "Added\n", stderr: "" }])
+    const { exec, calls } = fakeExec([
+      { code: 0, stdout: "Added\n", stderr: "" },
+    ])
     await putCodexServer(
       "questdb",
       { command: "npx", args: ["-y", "@questdb/mcp-bridge@0.2.0"] },
@@ -150,6 +157,24 @@ describe("isCodexNotFound", () => {
       false,
     )
     expect(isCodexNotFound(null)).toBe(false)
+  })
+})
+
+describe("isWindowsCommandNotFound", () => {
+  it("recognizes cmd.exe's missing-command exit and message on every CI OS", () => {
+    expect(isWindowsCommandNotFound(9009, "", "win32")).toBe(true)
+    expect(
+      isWindowsCommandNotFound(
+        1,
+        "'codex' is not recognized as an internal or external command",
+        "win32",
+      ),
+    ).toBe(true)
+  })
+
+  it("does not reinterpret ordinary failures or non-Windows exits", () => {
+    expect(isWindowsCommandNotFound(1, "invalid config", "win32")).toBe(false)
+    expect(isWindowsCommandNotFound(9009, "", "linux")).toBe(false)
   })
 })
 
@@ -195,11 +220,32 @@ describe("sameCodexEntry", () => {
   it.each([
     [
       "different spec",
-      { command: "npx", args: ["-y", "@questdb/mcp-bridge@0.1.0"], env: { CONSOLE_ORIGIN: "http://x" } },
+      {
+        command: "npx",
+        args: ["-y", "@questdb/mcp-bridge@0.1.0"],
+        env: { CONSOLE_ORIGIN: "http://x" },
+      },
     ],
-    ["different command", { command: "node", args: ["-y", "@questdb/mcp-bridge@0.2.0"], env: { CONSOLE_ORIGIN: "http://x" } }],
-    ["different env", { command: "npx", args: ["-y", "@questdb/mcp-bridge@0.2.0"], env: { CONSOLE_ORIGIN: "http://y" } }],
-    ["missing env", { command: "npx", args: ["-y", "@questdb/mcp-bridge@0.2.0"] }],
+    [
+      "different command",
+      {
+        command: "node",
+        args: ["-y", "@questdb/mcp-bridge@0.2.0"],
+        env: { CONSOLE_ORIGIN: "http://x" },
+      },
+    ],
+    [
+      "different env",
+      {
+        command: "npx",
+        args: ["-y", "@questdb/mcp-bridge@0.2.0"],
+        env: { CONSOLE_ORIGIN: "http://y" },
+      },
+    ],
+    [
+      "missing env",
+      { command: "npx", args: ["-y", "@questdb/mcp-bridge@0.2.0"] },
+    ],
   ])("rejects a %s", (_label, entry) => {
     expect(sameCodexEntry(existing, entry)).toBe(false)
   })

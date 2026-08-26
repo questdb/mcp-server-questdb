@@ -286,6 +286,55 @@ describe("WebSocket round-trip", () => {
     expect(reason).toBe("malformed_message")
   })
 
+  it.each([
+    { name: "array", value: [MCP_BRIDGE_VERSION] },
+    { name: "number", value: 400 },
+    { name: "boolean", value: true },
+    { name: "null", value: null },
+    { name: "object", value: {} },
+    {
+      name: "non-coercible object",
+      value: { toString: null, valueOf: null },
+    },
+  ] as Array<{ name: string; value: unknown }>)(
+    "closes with 4005 when expectedBridgeVersion is a non-string $name",
+    async ({ value: expectedBridgeVersion }) => {
+      const bridge = await startBridge()
+      teardown.push(bridge.stop)
+      const ws = await open(bridge.port)
+      const closed = new Promise<{ code: number; reason: string }>(
+        (resolve) => {
+          ws.once("close", (code, reason) =>
+            resolve({ code, reason: reason.toString() }),
+          )
+        },
+      )
+
+      ws.send(
+        JSON.stringify({
+          v: MCP_BRIDGE_VERSION,
+          type: "hello",
+          token: TOKEN,
+          userAgent: "test",
+          expectedBridgeVersion,
+          consoleOrigin: "http://127.0.0.1:9000",
+          tools: helloTools,
+          permissions: {
+            grantSchemaAccess: true,
+            read: true,
+            write: true,
+          },
+        }),
+      )
+
+      await expect(closed).resolves.toEqual({
+        code: 4005,
+        reason: "malformed_expected_bridge_version",
+      })
+      expect(bridge.session.getPairingSnapshot()).toEqual({ paired: false })
+    },
+  )
+
   it("does not process a valid frame buffered behind a malformed one (no pairing on a closing socket)", async () => {
     // Given a connected socket
     const bridge = await startBridge()

@@ -36,7 +36,24 @@ describe("parseCli", () => {
     if (out.kind !== "exit") throw new Error("expected exit")
     expect(out.code).toBe(2)
     expect(out.stderr).toContain("unknown command 'frobnicate'")
+    expect(out.stderr).toContain(
+      "Run 'npx @questdb/mcp-server-questdb --help' for usage.",
+    )
     expect(out.stdout).toBeUndefined()
+  })
+
+  it("uses the injected standalone help command for unknown commands", () => {
+    const out = parseCli(
+      ["frobnicate"],
+      "1.2.3",
+      HELP,
+      "node mcp-server-questdb-1.2.3.mjs --help",
+    )
+    if (out.kind !== "exit") throw new Error("expected exit")
+    expect(out.stderr).toContain(
+      "Run 'node mcp-server-questdb-1.2.3.mjs --help' for usage.",
+    )
+    expect(out.stderr).not.toContain("npx")
   })
 })
 

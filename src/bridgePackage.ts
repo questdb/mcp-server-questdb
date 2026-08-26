@@ -1,14 +1,14 @@
 // Published as @questdb/mcp-bridge before 0.3.0; every release since is
 // dual-published under both names so commands baked into shipped consoles
 // keep resolving.
+import { parseBridgeVersion } from "./protocolVersion.js"
+
 export const BRIDGE_PACKAGE = "@questdb/mcp-server-questdb"
 export const LEGACY_BRIDGE_PACKAGE = "@questdb/mcp-bridge"
 
 const isPreRenameVersion = (version: string): boolean => {
-  const m = /^(\d+)\.(\d+)\.\d+/.exec(version.trim())
-  if (!m) return false
-  const [major, minor] = [Number(m[1]), Number(m[2])]
-  return major === 0 && minor < 3
+  const parsed = parseBridgeVersion(version)
+  return parsed !== null && parsed.major === 0 && parsed.minor < 3
 }
 
 // Versions below 0.3.0 exist only under the legacy name, so a rendered

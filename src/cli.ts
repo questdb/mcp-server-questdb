@@ -16,6 +16,7 @@ export const parseCli = (
   argv: string[],
   version: string,
   helpText: () => string,
+  helpCommand: string = `npx ${BRIDGE_PACKAGE} --help`,
 ): CliOutcome => {
   const command = argv[0]
 
@@ -38,7 +39,7 @@ export const parseCli = (
     code: 2,
     stderr:
       `${BRIDGE_PACKAGE}: unknown command '${command}'.\n` +
-      `Run 'npx ${BRIDGE_PACKAGE} --help' for usage.\n`,
+      `Run '${helpCommand}' for usage.\n`,
   }
 }
 

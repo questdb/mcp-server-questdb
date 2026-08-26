@@ -2,10 +2,20 @@
 // the current field and, when already empty, steps back to the previous prompt.
 import { checkbox } from "@inquirer/prompts"
 import { BRIDGE_PACKAGE } from "../bridgePackage.js"
+import {
+  DISTRIBUTION_CHANNEL,
+  selfPath,
+  setupCommand,
+} from "../distribution.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
 import { brand, gray, green, red, renderBanner } from "./banner.js"
 import { armFastEscape, BACK, confirmBack, text } from "./prompts.js"
-import { ALL_AGENT_IDS, buildAgents, type AgentConfig, type AgentId } from "./agents.js"
+import {
+  ALL_AGENT_IDS,
+  buildAgents,
+  type AgentConfig,
+  type AgentId,
+} from "./agents.js"
 import { applyAgentConfig, detectInstalledAgents } from "./applyConfig.js"
 import {
   buildBridgeEnv,
@@ -83,7 +93,9 @@ const printReview = (
   values: SetupAnswers,
 ): void => {
   out("\n  Review\n")
-  out(`    Agents: ${selectedIds.map((id) => agents[id].displayName).join(", ")}\n`)
+  out(
+    `    Agents: ${selectedIds.map((id) => agents[id].displayName).join(", ")}\n`,
+  )
   const envEntries = Object.entries(buildBridgeEnv(values))
   if (envEntries.length === 0) {
     out("    Env:    all defaults — no env block will be written\n")
@@ -97,7 +109,7 @@ const printReview = (
 export const runSetup = async (): Promise<number> => {
   if (!process.stdin.isTTY) {
     process.stderr.write(
-      `setup is interactive and needs a TTY. Run \`npx ${BRIDGE_PACKAGE} setup\` ` +
+      `setup is interactive and needs a TTY. Run \`${setupCommand()}\` ` +
         "directly in a terminal.\n",
     )
     return 1
@@ -113,7 +125,9 @@ export const runSetup = async (): Promise<number> => {
   )
   out(
     gray(
-      `  Pinning bridge v${MCP_BRIDGE_VERSION} — must match the version your QuestDB Web Console expects.`,
+      DISTRIBUTION_CHANNEL === "standalone"
+        ? `  Pinning bridge v${MCP_BRIDGE_VERSION} (${selfPath()}) — must match the version your QuestDB Web Console expects.`
+        : `  Pinning bridge v${MCP_BRIDGE_VERSION} — must match the version your QuestDB Web Console expects.`,
     ) + "\n\n",
   )
 
@@ -134,7 +148,8 @@ export const runSetup = async (): Promise<number> => {
     // Outer loop lets the first env field's Esc return to the agent picker.
     for (;;) {
       const selectedIds = await checkbox<AgentId>({
-        message: "Step 1 — Select coding agents to configure (Space toggles, Enter confirms)",
+        message:
+          "Step 1 — Select coding agents to configure (Space toggles, Enter confirms)",
         choices: ALL_AGENT_IDS.map((id) => ({
           name: detected.has(id)
             ? `${agents[id].displayName}  (detected)`
@@ -150,7 +165,9 @@ export const runSetup = async (): Promise<number> => {
             // Recap lists clean names, one per line; the "(detected)" hint
             // only matters while choosing.
             renderSelectedChoices: (selected: readonly { value: AgentId }[]) =>
-              selected.map((c) => `\n    ${agents[c.value].displayName}`).join(""),
+              selected
+                .map((c) => `\n    ${agents[c.value].displayName}`)
+                .join(""),
           },
         },
       })
@@ -183,16 +200,28 @@ export const runSetup = async (): Promise<number> => {
         const res = await applyAgentConfig(agents[id], env)
         if (res.status === "failed") {
           anyFail = true
-          out(`  ${red("✖")} ${res.agent}: ${res.error}\n    ${gray(res.path)}\n\n`)
+          out(
+            `  ${red("✖")} ${res.agent}: ${res.error}\n    ${gray(res.path)}\n\n`,
+          )
         } else {
           const label =
-            res.status === "reconfigured" ? "configured (overwritten)" : "configured"
-          out(`  ${green("✔")} ${res.agent} ${label}\n    ${gray(res.path)}\n\n`)
+            res.status === "reconfigured"
+              ? "configured (overwritten)"
+              : "configured"
+          out(
+            `  ${green("✔")} ${res.agent} ${label}\n    ${gray(res.path)}\n\n`,
+          )
         }
       }
       out(
         "  Done. Restart your coding agent if it was running, then ask it to pair with your QuestDB Web Console. The agent will walk you through pairing.\n\n",
       )
+      if (DISTRIBUTION_CHANNEL === "standalone") {
+        out(
+          `  Keep the bundle at ${selfPath()}; agent configs launch that exact path. ` +
+            "If you move it, run its `upgrade` command from the new location to repair every config.\n\n",
+        )
+      }
       return anyFail ? 1 : 0
     }
   } catch (err) {

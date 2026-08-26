@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { bundleInstallPath, commandArg } from "../distribution.js"
 import {
   CONNECT_TOOL,
   WAIT_TOOL,
@@ -9,7 +10,9 @@ import {
 
 const PAIRING_TOOLS = [CONNECT_TOOL, WAIT_TOOL] as const
 
-const makeCtx = (overrides: Partial<PairingToolsContext> = {}): PairingToolsContext => ({
+const makeCtx = (
+  overrides: Partial<PairingToolsContext> = {},
+): PairingToolsContext => ({
   buildDeepLink: () =>
     "http://127.0.0.1:9000/?mcp-pair=1&mcp-ws=ws://127.0.0.1:57123&mcp-token=abcdefghijklmnopqrst1234",
   getCredentials: () => ({
@@ -169,7 +172,9 @@ describe("get_pairing_credentials handler", () => {
     const actions = parsed.assistantNextActions as string[]
     expect(actions.length).toBeGreaterThanOrEqual(2)
     // The "show user" instruction must come before the "call wait_for_pairing" instruction.
-    const showIdx = actions.findIndex((a) => /write a message to the user/i.test(a))
+    const showIdx = actions.findIndex((a) =>
+      /write a message to the user/i.test(a),
+    )
     const waitIdx = actions.findIndex((a) => /wait_for_pairing/i.test(a))
     expect(showIdx).toBeGreaterThanOrEqual(0)
     expect(waitIdx).toBeGreaterThan(showIdx)
@@ -191,7 +196,11 @@ describe("get_pairing_credentials handler", () => {
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(parsed.paired).toBe(true)
     expect(parsed.consoleOrigin).toBe("http://127.0.0.1:9000")
-    expect(parsed.permissions).toEqual({ grantSchemaAccess: true, read: true, write: false })
+    expect(parsed.permissions).toEqual({
+      grantSchemaAccess: true,
+      read: true,
+      write: false,
+    })
     expect(typeof parsed.message).toBe("string")
     expect(parsed.warning).toBeUndefined()
   })
@@ -226,10 +235,71 @@ describe("get_pairing_credentials handler", () => {
       true,
     )
     expect(
-      actions.some((a) =>
-        a.includes("npx @questdb/mcp-bridge@0.2.0 upgrade"),
+      actions.some((a) => a.includes("npx @questdb/mcp-bridge@0.2.0 upgrade")),
+    ).toBe(true)
+  })
+
+  it("renders standalone download guidance for an injected channel", async () => {
+    const { handleConnectWebConsole } = createPairingToolHandlers(
+      makeCtx({
+        getPairingState: () => ({
+          paired: true,
+          sessionId: "s1",
+          consoleOrigin: "http://127.0.0.1:9000",
+          permissions: { grantSchemaAccess: true, read: true, write: true },
+          versionMismatch: {
+            bridgeVersion: "0.4.0",
+            expectedBridgeVersion: "0.4.1",
+          },
+        }),
+      }),
+      undefined,
+      "standalone",
+    )
+    const out = await handleConnectWebConsole()
+    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const expectedUrl =
+      "https://github.com/questdb/mcp-server-questdb/releases/download/v0.4.1/mcp-server-questdb-0.4.1.mjs"
+    expect(parsed.userMessage as string).toContain(expectedUrl)
+    expect(parsed.userMessage as string).toContain(
+      `node ${commandArg(bundleInstallPath("0.4.1", "standalone"))} upgrade`,
+    )
+    expect(parsed.userMessage as string).not.toContain("npx")
+    expect(
+      (parsed.assistantNextActions as string[]).some((action) =>
+        action.includes(expectedUrl),
       ),
     ).toBe(true)
+  })
+
+  it("renders a concrete standalone path for older versions", async () => {
+    const { handleConnectWebConsole } = createPairingToolHandlers(
+      makeCtx({
+        getPairingState: () => ({
+          paired: true,
+          sessionId: "s1",
+          consoleOrigin: "http://127.0.0.1:9000",
+          permissions: { grantSchemaAccess: true, read: true, write: true },
+          versionMismatch: {
+            bridgeVersion: "0.4.0",
+            expectedBridgeVersion: "0.2.0",
+          },
+        }),
+      }),
+      undefined,
+      "standalone",
+    )
+    const parsed = JSON.parse(
+      (await handleConnectWebConsole()).content[0].text,
+    ) as Record<string, unknown>
+    expect(parsed.userMessage as string).toContain(
+      "releases/download/v0.2.0/mcp-server-questdb-0.2.0.mjs",
+    )
+    expect(parsed.userMessage as string).toContain(
+      `node ${commandArg(bundleInstallPath("0.2.0", "standalone"))} upgrade`,
+    )
+    expect(parsed.userMessage as string).not.toContain("npx")
+    expect(parsed.userMessage as string).not.toContain("check the releases")
   })
 
   it("returns an actionable incompatible_bridge error when the console was refused", async () => {
@@ -254,6 +324,36 @@ describe("get_pairing_credentials handler", () => {
       "npx @questdb/mcp-server-questdb@2.0.0 upgrade",
     )
     expect(Array.isArray(parsed.assistantNextActions)).toBe(true)
+  })
+
+  it("renders standalone guidance in the incompatible payload", async () => {
+    const { handleConnectWebConsole } = createPairingToolHandlers(
+      makeCtx({
+        getPairingState: () => ({
+          paired: false,
+          incompatible: {
+            bridgeVersion: "0.4.0",
+            expectedBridgeVersion: "1.0.0",
+          },
+        }),
+      }),
+      undefined,
+      "standalone",
+    )
+    const out = await handleConnectWebConsole()
+    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    expect(out.isError).toBe(true)
+    expect(parsed.userMessage as string).toContain(
+      "releases/download/v1.0.0/mcp-server-questdb-1.0.0.mjs",
+    )
+    expect(parsed.userMessage as string).toContain(
+      `node ${commandArg(bundleInstallPath("1.0.0", "standalone"))} upgrade`,
+    )
+    expect(parsed.userMessage as string).not.toContain("npx")
+    expect(parsed.warning as string).toContain("Pairing was refused")
+    expect(parsed.warning as string).not.toContain(
+      "existing tools keep working",
+    )
   })
 
   it("opens the ws server (ensureListening) before building the deep link", async () => {
@@ -361,7 +461,11 @@ describe("wait_for_pairing handler", () => {
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(parsed.paired).toBe(true)
     expect(parsed.consoleOrigin).toBe("http://127.0.0.1:9000")
-    expect(parsed.permissions).toEqual({ grantSchemaAccess: true, read: true, write: true })
+    expect(parsed.permissions).toEqual({
+      grantSchemaAccess: true,
+      read: true,
+      write: true,
+    })
     expect(parsed.warning).toBeUndefined()
   })
 
@@ -387,7 +491,11 @@ describe("wait_for_pairing handler", () => {
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(parsed.paired).toBe(true)
     expect(parsed.consoleOrigin).toBe("http://127.0.0.1:9000")
-    expect(parsed.permissions).toEqual({ grantSchemaAccess: true, read: true, write: true })
+    expect(parsed.permissions).toEqual({
+      grantSchemaAccess: true,
+      read: true,
+      write: true,
+    })
     expect(parsed.warning).toBeUndefined()
   })
 
@@ -421,9 +529,7 @@ describe("wait_for_pairing handler", () => {
       true,
     )
     expect(
-      actions.some((a) =>
-        a.includes("npx @questdb/mcp-bridge@0.2.0 upgrade"),
-      ),
+      actions.some((a) => a.includes("npx @questdb/mcp-bridge@0.2.0 upgrade")),
     ).toBe(true)
   })
 
@@ -559,8 +665,7 @@ describe("wait_for_pairing handler", () => {
   it("does NOT increment retryCount on rate_limited (only on real timeouts)", async () => {
     let nextResult: "rate_limited" | "timeout" = "rate_limited"
     const ctx = makeCtx({
-      waitForPair: () =>
-        Promise.resolve({ paired: false, reason: nextResult }),
+      waitForPair: () => Promise.resolve({ paired: false, reason: nextResult }),
     })
     const { handleWaitForPairing, counters } = createPairingToolHandlers(ctx)
     await handleWaitForPairing({})
