@@ -65,8 +65,17 @@ jobs:
 
       - name: Install mcp-publisher
         if: steps.check.outputs.exists == 'false'
+        env:
+          MCP_PUBLISHER_VERSION: 1.8.1
+          MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          ARCHIVE=mcp-publisher_linux_amd64.tar.gz
+          curl --fail --show-error --location --retry 3 \
+            --output "$ARCHIVE" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/${ARCHIVE}"
+          printf '%s  %s\n' "$MCP_PUBLISHER_SHA256" "$ARCHIVE" | sha256sum --check --strict
+          tar xzf "$ARCHIVE" mcp-publisher
+          rm "$ARCHIVE"
 
       # A workflow in this org's repo gets io.github.questdb/* publish rights
       # via OIDC; no personal login or org-owner account is involved.
