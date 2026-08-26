@@ -62,6 +62,7 @@ jobs:
     name: Prepare GitHub Release
     needs: verify
     runs-on: ubuntu-latest
+    environment: release
     # Serialize every release-mutating job for the same version, across a push
     # and a recovery dispatch alike, so concurrent runs never race the release's
     # assets. cancel-in-progress stays false: a superseded run must finish, not
@@ -353,6 +354,7 @@ jobs:
       needs.prepare_github_release.outputs.complete != 'true' &&
       needs.github_release_bundle.result == 'success'
     runs-on: ubuntu-latest
+    environment: release
     concurrency:
       group: release-${{ github.repository }}-v${{ needs.prepare_github_release.outputs.version }}
       cancel-in-progress: false
