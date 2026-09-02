@@ -1,9 +1,4 @@
-# `@questdb/mcp-server-questdb`
-
-> Formerly published as `@questdb/mcp-bridge`. Every release from 0.3.0 on is
-> published under both names, so existing configs keep working. On an old
-> install, run `npx @questdb/mcp-bridge upgrade` once — it migrates your
-> agent configs to the new name.
+# QuestDB MCP Server
 
 An MCP server that connects coding agents (Claude Code, Codex, Cursor, OpenCode …) to a
 running QuestDB Web Console. The agent gets tools to create notebook
