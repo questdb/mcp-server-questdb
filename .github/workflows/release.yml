@@ -196,12 +196,15 @@ jobs:
               );
             }
 
-            const assetNames = new Set(release?.assets.map((asset) => asset.name) ?? []);
+            const hasUsableAsset = (name) =>
+              (release?.assets ?? []).some(
+                (asset) => asset.name === name && asset.state === 'uploaded' && asset.size > 0,
+              );
             const complete =
               release !== null &&
               releaseSha !== null &&
               !release.draft &&
-              [...expectedAssets].every((name) => assetNames.has(name));
+              [...expectedAssets].every(hasUsableAsset);
             if (complete) {
               core.setOutput('complete', 'true');
               core.setOutput('release_id', String(release.id));
@@ -392,7 +395,10 @@ jobs:
             const uploads = [
               { name: bundleName, path: `out/${bundleName}`, type: 'application/javascript' },
               { name: 'THIRD_PARTY_NOTICES.txt', path: 'out/THIRD_PARTY_NOTICES.txt', type: 'text/plain' },
-            ];
+            ].map((upload) => ({
+              ...upload,
+              size: fs.statSync(upload.path).size,
+            }));
 
             let release = (
               await github.rest.repos.getRelease({
@@ -434,9 +440,15 @@ jobs:
                 release_id: releaseId,
               })
             ).data;
-            const names = new Set(release.assets.map((asset) => asset.name));
-            const missing = uploads.map((upload) => upload.name).filter((name) => !names.has(name));
-            if (missing.length) throw new Error(`Release asset group is incomplete: ${missing.join(', ')}`);
+            const invalid = uploads.filter((upload) => {
+              const asset = release.assets.find((candidate) => candidate.name === upload.name);
+              return !asset || asset.state !== 'uploaded' || asset.size !== upload.size;
+            });
+            if (invalid.length) {
+              throw new Error(
+                `Release asset group is incomplete or invalid: ${invalid.map((upload) => upload.name).join(', ')}`,
+              );
+            }
 
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
