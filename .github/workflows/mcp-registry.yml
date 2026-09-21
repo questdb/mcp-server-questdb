@@ -51,17 +51,33 @@ jobs:
           jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.json.tmp
           mv server.json.tmp server.json
 
+      # Ask for the exact target version rather than the search listing: the
+      # listing's order is not "latest first", so comparing against its first
+      # entry misreports an already-published version as missing and a recovery
+      # run for an older release would try to republish it. Only a definitive
+      # 404 means "publish"; any other lookup failure fails closed.
       - name: Check if the registry already has this version
         id: check
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          CURRENT=$(curl -s "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.questdb/mcp-server-questdb" | jq -r '.servers[0].server.version // empty')
-          if [ "$CURRENT" = "$VERSION" ]; then
-            echo "Registry already has $VERSION"
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+          NAME=$(jq -r '.name' server.json)
+          ENCODED_NAME=$(jq -rn --arg n "$NAME" '$n | @uri')
+          STATUS=$(curl --silent --show-error --retry 3 \
+            --output /dev/null --write-out '%{http_code}' \
+            "https://registry.modelcontextprotocol.io/v0.1/servers/${ENCODED_NAME}/versions/${VERSION}")
+          case "$STATUS" in
+            200)
+              echo "Registry already has $NAME v$VERSION"
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Registry lookup for $NAME v$VERSION returned HTTP $STATUS; refusing to guess whether it is published"
+              exit 1
+              ;;
+          esac
 
       - name: Install mcp-publisher
         if: steps.check.outputs.exists == 'false'

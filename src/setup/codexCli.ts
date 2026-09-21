@@ -14,8 +14,13 @@ const WINDOWS = process.platform === "win32"
 // without a shell; with a shell enabled, execFile does NOT quote args, so
 // quote anything the shell would mangle. Percent signs must be doubled even
 // inside quotes because cmd.exe expands %NAME% before launching the shim.
+// Parentheses are quoted too: legacy cmd shims expand their arguments inside
+// an IF (...) ELSE (...) block, where a bare ")" in a standalone bundle path
+// such as C:\QuestDB(test)\... would terminate the block.
 export const winQuote = (a: string): string =>
-  /[\s"&|<>^%]/.test(a) ? `"${a.replace(/%/g, "%%").replace(/"/g, '\\"')}"` : a
+  /[\s"&|<>^%()]/.test(a)
+    ? `"${a.replace(/%/g, "%%").replace(/"/g, '\\"')}"`
+    : a
 
 export type ExecResult = { code: number; stdout: string; stderr: string }
 // Injectable for tests; production always spawns the real `codex` binary with

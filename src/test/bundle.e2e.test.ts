@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -31,6 +31,20 @@ type JsonRpcMessage = {
   }
 }
 
+// The only executable a child may resolve from PATH. Node's own directory is
+// not usable here: on Homebrew and nvm installs it also holds every globally
+// installed tool, so a contributor with `codex` beside `node` would leak a
+// real Codex CLI into the upgrade tests and `codex mcp get` would run against
+// the synthetic CODEX_HOME.
+let isolatedBin: string
+
+const createIsolatedBin = (dir: string): string => {
+  const bin = join(dir, "isolated-bin")
+  mkdirSync(bin)
+  symlinkSync(process.execPath, join(bin, basename(process.execPath)))
+  return bin
+}
+
 // Keep every child away from the contributor's bridge settings and agent
 // configs. The explicit allowlist retains only the OS values needed to launch
 // Node; bridge-specific variables from the host cannot affect the test.
@@ -38,7 +52,7 @@ const isolatedEnv = (home: string): NodeJS.ProcessEnv => ({
   HOME: home,
   USERPROFILE: home,
   CODEX_HOME: join(home, ".codex"),
-  PATH: dirname(process.execPath),
+  PATH: isolatedBin,
   ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
   ...(process.env.WINDIR ? { WINDIR: process.env.WINDIR } : {}),
   ...(process.env.COMSPEC ? { COMSPEC: process.env.COMSPEC } : {}),
@@ -152,6 +166,7 @@ describe.skipIf(process.platform === "win32")("standalone bundle e2e", () => {
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "bridge-e2e-"))
+    isolatedBin = createIsolatedBin(dir)
     outDir = join(dir, "artifact")
     const unrelatedCwd = join(dir, "unrelated-cwd")
     mkdirSync(unrelatedCwd)

@@ -185,8 +185,17 @@ describe("winQuote", () => {
     )
   })
 
+  it("quotes paths containing parentheses", () => {
+    expect(winQuote("C:\\QuestDB(test)\\mcp-server-questdb-0.4.0.mjs")).toBe(
+      '"C:\\QuestDB(test)\\mcp-server-questdb-0.4.0.mjs"',
+    )
+  })
+
   it("leaves simple args unquoted", () => {
     expect(winQuote("questdb")).toBe("questdb")
+    expect(winQuote("C:\\QuestDB\\mcp-server-questdb-0.4.0.mjs")).toBe(
+      "C:\\QuestDB\\mcp-server-questdb-0.4.0.mjs",
+    )
   })
 })
 
