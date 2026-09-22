@@ -73,7 +73,8 @@ export const launchSpec = (
 
 // Standalone bundles are published as GitHub Release assets under a
 // deterministic URL, so runtime messages can render a full download
-// instruction for any version.
+// instruction for any supported version. Standalone bundles start at v0.4.0,
+// and it is guaranteed that every supported Web Console requests bridge v0.4.0 or later.
 export const bundleDownloadUrl = (version: string): string => {
   const v = encodeURIComponent(requireBridgeVersion(version))
   return `https://github.com/questdb/mcp-server-questdb/releases/download/v${v}/mcp-server-questdb-${v}.mjs`

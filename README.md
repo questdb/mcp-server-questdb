@@ -47,10 +47,13 @@ Or add it to your MCP client's config by hand (e.g. `~/.claude/.mcp.json`):
 ### Offline / restricted install (no npx)
 
 Environments that can't run `npx` (no npm registry access, vet-then-vendor
-policies) can use the standalone bundle attached to each published version's
+policies) can use the standalone bundle attached to each supported version's
 [GitHub Release](https://github.com/questdb/mcp-server-questdb/releases):
 a single self-contained `.mjs` file needing only Node ≥ 22, making no
 network connections except the local WebSocket to your Web Console.
+
+Standalone bundles are available starting with bridge version 0.4.0. All
+supported QuestDB Web Console versions request bridge version 0.4.0 or later.
 
 Download the bundle (`mcp-server-questdb-<version>.mjs`) and
 `THIRD_PARTY_NOTICES.txt` from the release, then move the bundle to a
