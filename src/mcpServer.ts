@@ -237,6 +237,7 @@ export const startMcpServer = async ({
   )
 
   const pairingCtx: PairingToolsContext = {
+    beginPairingAttempt: () => session.beginPairingAttempt(),
     ensureListening,
     buildDeepLink: () => session.buildDeepLink(),
     getCredentials: () => session.getCredentials(),

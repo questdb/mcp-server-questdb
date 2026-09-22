@@ -14,8 +14,13 @@ const WINDOWS = process.platform === "win32"
 // without a shell; with a shell enabled, execFile does NOT quote args, so
 // quote anything the shell would mangle. Percent signs must be doubled even
 // inside quotes because cmd.exe expands %NAME% before launching the shim.
+// Parentheses are quoted too: legacy cmd shims expand their arguments inside
+// an IF (...) ELSE (...) block, where a bare ")" in a standalone bundle path
+// such as C:\QuestDB(test)\... would terminate the block.
 export const winQuote = (a: string): string =>
-  /[\s"&|<>^%]/.test(a) ? `"${a.replace(/%/g, "%%").replace(/"/g, '\\"')}"` : a
+  /[\s"&|<>^%()]/.test(a)
+    ? `"${a.replace(/%/g, "%%").replace(/"/g, '\\"')}"`
+    : a
 
 export type ExecResult = { code: number; stdout: string; stderr: string }
 // Injectable for tests; production always spawns the real `codex` binary with
@@ -33,6 +38,17 @@ export const codexNotFoundError = (): Error =>
 export const isCodexNotFound = (err: unknown): boolean =>
   err instanceof Error &&
   (err as Error & { code?: string }).code === "codex-not-found"
+
+// shell:true masks ENOENT on Windows: cmd.exe itself starts successfully and
+// reports its command-not-found exit code (9009). Keep this pure and injectable
+// so the Windows-only branch remains covered on every CI host.
+export const isWindowsCommandNotFound = (
+  code: number,
+  stderr: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean =>
+  platform === "win32" &&
+  (code === 9009 || stderr.toLowerCase().includes("is not recognized"))
 
 export const execCodex: ExecFn = (args) =>
   new Promise((resolve, reject) => {
@@ -52,10 +68,7 @@ export const execCodex: ExecFn = (args) =>
           return
         }
         const code = e === null ? 0 : typeof e.code === "number" ? e.code : 1
-        // shell:true masks ENOENT on Windows: cmd.exe spawns fine and exits
-        // 9009 ("'codex' is not recognized as an internal or external
-        // command") when the binary is missing.
-        if (WINDOWS && (code === 9009 || stderr.includes("is not recognized"))) {
+        if (isWindowsCommandNotFound(code, stderr)) {
           reject(codexNotFoundError())
           return
         }
@@ -144,7 +157,15 @@ export const putCodexServer = async (
   const envFlags = Object.entries(
     (entry.env as Record<string, string> | undefined) ?? {},
   ).flatMap(([k, v]) => ["--env", `${k}=${v}`])
-  const r = await exec(["mcp", "add", name, ...envFlags, "--", command, ...args])
+  const r = await exec([
+    "mcp",
+    "add",
+    name,
+    ...envFlags,
+    "--",
+    command,
+    ...args,
+  ])
   if (r.code !== 0) {
     throw new Error(
       `\`codex mcp add\` failed: ${firstLine(`${r.stderr}\n${r.stdout}`) || `exit ${r.code}`}`,

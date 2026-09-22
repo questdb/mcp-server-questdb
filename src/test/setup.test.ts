@@ -68,10 +68,10 @@ describe("agents — buildEntry", () => {
       command: ["npx", "-y", BRIDGE_PACKAGE_SPEC],
       enabled: true,
     })
-    expect(agents.opencode.buildEntry({ MCP_BRIDGE_PORT: "9009" })).toEqual({
+    expect(agents.opencode.buildEntry({ MCP_BRIDGE_PORT: "9123" })).toEqual({
       type: "local",
       command: ["npx", "-y", BRIDGE_PACKAGE_SPEC],
-      environment: { MCP_BRIDGE_PORT: "9009" },
+      environment: { MCP_BRIDGE_PORT: "9123" },
       enabled: true,
     })
   })
@@ -196,7 +196,7 @@ describe("buildBridgeEnv", () => {
 
   it("emits each changed var, normalizing the origin and port", () => {
     // Given overridden answers
-    const answers = { consoleOrigin: "https://q.example.com:9000", port: "9009" }
+    const answers = { consoleOrigin: "https://q.example.com:9000", port: "9123" }
 
     // When building the env
     const env = buildBridgeEnv(answers)
@@ -204,7 +204,7 @@ describe("buildBridgeEnv", () => {
     // Then both are emitted in normalized form
     expect(env).toEqual({
       CONSOLE_ORIGIN: "https://q.example.com:9000",
-      MCP_BRIDGE_PORT: "9009",
+      MCP_BRIDGE_PORT: "9123",
     })
   })
 })

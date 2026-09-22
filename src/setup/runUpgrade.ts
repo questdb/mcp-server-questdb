@@ -1,7 +1,5 @@
-import {
-  BRIDGE_PACKAGE,
-  LEGACY_BRIDGE_PACKAGE,
-} from "../bridgePackage.js"
+import { BRIDGE_PACKAGE, LEGACY_BRIDGE_PACKAGE } from "../bridgePackage.js"
+import { setupCommand } from "../distribution.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
 import { buildAgents, SERVER_NAME, type AgentConfig } from "./agents.js"
 import { resolveConfigPath } from "./applyConfig.js"
@@ -31,14 +29,70 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 // references the bridge at all.
 const PINNABLE_PACKAGES = [BRIDGE_PACKAGE, LEGACY_BRIDGE_PACKAGE]
 
+// Reporting must inspect only executable argv. Environment values are opaque
+// user data and may coincidentally contain a package or bundle name.
+const launchStrings = (entryText: string): string[] => {
+  try {
+    const parsed = JSON.parse(entryText) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return typeof parsed === "string" ? [parsed] : []
+    }
+    const parsedEntry = parsed as Record<string, unknown>
+    const entry =
+      parsedEntry.transport && typeof parsedEntry.transport === "object"
+        ? (parsedEntry.transport as Record<string, unknown>)
+        : parsedEntry
+    const values: string[] = []
+    if (typeof entry.command === "string") values.push(entry.command)
+    if (Array.isArray(entry.command))
+      values.push(
+        ...entry.command.filter(
+          (value): value is string => typeof value === "string",
+        ),
+      )
+    if (Array.isArray(entry.args))
+      values.push(
+        ...entry.args.filter(
+          (value): value is string => typeof value === "string",
+        ),
+      )
+    return values
+  } catch {
+    return [entryText]
+  }
+}
+
 export const describeOldPin = (entryText: string): string | null => {
+  const launchText = JSON.stringify(launchStrings(entryText))
   for (const pkg of PINNABLE_PACKAGES) {
-    const m = new RegExp(`${escapeRe(pkg)}@([^\\s"'\\]]+)`).exec(entryText)
+    const m = new RegExp(`${escapeRe(pkg)}@([^\\s"'\\]]+)`).exec(launchText)
     if (m) return m[1]
   }
-  return PINNABLE_PACKAGES.some((pkg) => entryText.includes(pkg))
+  // Standalone entries reference the bundle file, whose name carries the pin
+  // (mcp-server-questdb-<version>.mjs).
+  const bundle = /mcp-server-questdb-(\d+\.\d+\.\d+[^\s"'\\/]*)\.mjs/.exec(
+    launchText,
+  )
+  if (bundle) return bundle[1]
+  return PINNABLE_PACKAGES.some((pkg) => launchText.includes(pkg))
     ? "unpinned"
     : null
+}
+
+export const describeBundlePath = (entryText: string): string | null =>
+  launchStrings(entryText).find((value) =>
+    /(?:^|[\\/])[^\\/]+\.mjs$/.test(value),
+  ) ?? null
+
+const bundlePathChange = (
+  existingText: string,
+  entry: Record<string, unknown>,
+): { fromBundlePath?: string; toBundlePath?: string } => {
+  const fromBundlePath = describeBundlePath(existingText)
+  const toBundlePath = describeBundlePath(JSON.stringify(entry))
+  return fromBundlePath && toBundlePath && fromBundlePath !== toBundlePath
+    ? { fromBundlePath, toBundlePath }
+    : {}
 }
 
 type ExistingEntry = { text: string; env?: Record<string, string> }
@@ -62,7 +116,14 @@ const readExistingEntry = (
 }
 
 type AgentOutcome =
-  | { agent: string; kind: "updated"; from: string | null; path: string }
+  | {
+      agent: string
+      kind: "updated"
+      from: string | null
+      path: string
+      fromBundlePath?: string
+      toBundlePath?: string
+    }
   | { agent: string; kind: "current"; path: string }
   | { agent: string; kind: "absent" }
   | { agent: string; kind: "failed"; path: string; error: string }
@@ -82,7 +143,8 @@ const upgradeCodexAgent = async (
   try {
     existing = await getCodexServer(SERVER_NAME, exec)
   } catch (err) {
-    if (isCodexNotFound(err)) return { agent: agent.displayName, kind: "absent" }
+    if (isCodexNotFound(err))
+      return { agent: agent.displayName, kind: "absent" }
     return {
       agent: agent.displayName,
       kind: "failed",
@@ -110,6 +172,7 @@ const upgradeCodexAgent = async (
     kind: "updated",
     from: describeOldPin(existing.text),
     path,
+    ...bundlePathChange(existing.text, entry),
   }
 }
 
@@ -157,12 +220,7 @@ export const upgradeAgent = async (
   if (existing === null) return { agent: agent.displayName, kind: "absent" }
 
   const entry = agent.buildEntry(existing.env ?? {})
-  const { content } = upsertJsonServer(
-    raw,
-    agent.configKey,
-    SERVER_NAME,
-    entry,
-  )
+  const { content } = upsertJsonServer(raw, agent.configKey, SERVER_NAME, entry)
   if (content === raw)
     return { agent: agent.displayName, kind: "current", path }
   try {
@@ -180,6 +238,7 @@ export const upgradeAgent = async (
     kind: "updated",
     from: describeOldPin(existing.text),
     path,
+    ...bundlePathChange(existing.text, entry),
   }
 }
 
@@ -197,9 +256,11 @@ export const runUpgrade = async (): Promise<number> => {
     const r = await upgradeAgent(agent)
     if (r.kind === "updated") {
       reported.push(
-        r.from !== null
-          ? `  ✓ ${r.agent}: ${r.from} → ${target}  (${r.path})`
-          : `  ✓ ${r.agent}: replaced existing "questdb" entry → ${target}  (${r.path})`,
+        r.fromBundlePath && r.toBundlePath
+          ? `  ✓ ${r.agent}: bundle path ${r.fromBundlePath} → ${r.toBundlePath}  (${r.path})`
+          : r.from !== null
+            ? `  ✓ ${r.agent}: ${r.from} → ${target}  (${r.path})`
+            : `  ✓ ${r.agent}: replaced existing "questdb" entry → ${target}  (${r.path})`,
       )
       changed++
     } else if (r.kind === "current") {
@@ -214,7 +275,7 @@ export const runUpgrade = async (): Promise<number> => {
   if (reported.length === 0) {
     console.log(
       `  No coding-agent config has a "questdb" MCP server.\n` +
-        `  Run \`npx ${BRIDGE_PACKAGE}@${target} setup\` to configure one.`,
+        `  Run \`${setupCommand(target)}\` to configure one.`,
     )
   } else {
     console.log(reported.join("\n"))

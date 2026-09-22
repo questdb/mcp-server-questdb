@@ -2,6 +2,7 @@
 import { findFreePort, generateToken } from "./sessionStore.js"
 import { BridgeSession } from "./bridgeSession.js"
 import { BRIDGE_PACKAGE } from "./bridgePackage.js"
+import { commandArg, DISTRIBUTION_CHANNEL, selfPath } from "./distribution.js"
 import { MCP_BRIDGE_VERSION } from "./protocolVersion.js"
 import {
   startWsServer,
@@ -44,14 +45,21 @@ const PER_TOOL_TIMEOUT_MS: Record<string, number> = {
   get_recent_user_actions: 15_000,
 }
 
+// How the user invokes us, rendered per distribution channel: the npm install
+// goes through npx; the standalone bundle is a file run with node.
+const LAUNCH =
+  DISTRIBUTION_CHANNEL === "standalone"
+    ? `node ${commandArg(selfPath())}`
+    : `npx ${BRIDGE_PACKAGE}`
+
 const USAGE = `${BRIDGE_PACKAGE} — bridge coding agents to a running QuestDB Web Console.
 
 Usage:
-  npx ${BRIDGE_PACKAGE} [start]    Start the bridge (default when no command is given)
-  npx ${BRIDGE_PACKAGE} setup      Configure the bridge for your coding agents (interactive)
-  npx ${BRIDGE_PACKAGE} upgrade    Re-pin existing coding-agent configs to this version
-  npx ${BRIDGE_PACKAGE} --version  Print the version and exit
-  npx ${BRIDGE_PACKAGE} --help     Print this help and exit
+  ${LAUNCH} [start]    Start the bridge (default when no command is given)
+  ${LAUNCH} setup      Configure the bridge for your coding agents (interactive)
+  ${LAUNCH} upgrade    Re-pin existing coding-agent configs to this version
+  ${LAUNCH} --version  Print the version and exit
+  ${LAUNCH} --help     Print this help and exit
 `
 
 // Synchronous, best-effort writes to a standard fd.
@@ -64,6 +72,9 @@ const writeFd = (fd: number, text: string): void => {
 }
 
 const helpText = (): string => {
+  // A standalone bundle is a lone file — whatever README.md happens to sit
+  // near it is not ours to print.
+  if (DISTRIBUTION_CHANNEL === "standalone") return USAGE
   try {
     const readmePath = fileURLToPath(new URL("../README.md", import.meta.url))
     return readFileSync(readmePath, "utf8")
@@ -75,7 +86,12 @@ const helpText = (): string => {
 
 // Parse argv before any logger/server side effects so --version and --help
 // stay pure (no log file, no port allocation) and exit immediately.
-const cli = parseCli(process.argv.slice(2), MCP_BRIDGE_VERSION, helpText)
+const cli = parseCli(
+  process.argv.slice(2),
+  MCP_BRIDGE_VERSION,
+  helpText,
+  `${LAUNCH} --help`,
+)
 if (cli.kind === "exit") {
   if (cli.stdout !== undefined) writeFd(process.stdout.fd, cli.stdout)
   if (cli.stderr !== undefined) writeFd(process.stderr.fd, cli.stderr)

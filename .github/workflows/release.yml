@@ -6,158 +6,636 @@ on:
       - master
   workflow_dispatch:
 
+# Jobs opt into write scopes only where required. Dependency install/build code
+# runs exclusively in read-only jobs and passes immutable artifacts forward.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
+
+# Concurrency is NOT set workflow-level: `github.ref` differs between a push
+# (refs/heads/master) and the documented recovery dispatch (refs/tags/vX), so a
+# ref-keyed group would let those two race the same release. The version isn't
+# known until a job reads package.json, so the release-mutating jobs below each
+# carry a job-level group keyed on the version instead.
 
 jobs:
-  publish:
-    name: Publish to NPM
+  verify:
+    name: Verify Release Candidate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - run: corepack enable
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "24"
-          cache: "yarn"
-          registry-url: "https://registry.npmjs.org"
+          cache: yarn
 
-      - name: Install dependencies
-        run: yarn install --immutable
-
-      - name: Build
-        run: yarn build
-
-      - name: Get package version
-        id: get-version
+      - name: Read package version
+        id: version
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Publishing version: $VERSION"
+          if ! printf '%s\n' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::package.json version must be canonical major.minor.patch"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Extract changelog for version
-        id: extract-changelog
-        env:
-          VERSION: ${{ steps.get-version.outputs.version }}
+      - run: yarn install --immutable
+      - run: yarn build
+      - name: Verify
         run: |
-          node << 'SCRIPT'
+          yarn lint
+          yarn typecheck
+          yarn test
+
+  # This job mutates tags/releases, but never installs or executes project
+  # dependencies. Draft releases are found via listReleases because GitHub's
+  # get-by-tag endpoint intentionally omits drafts.
+  prepare_github_release:
+    name: Prepare GitHub Release
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    # Serialize every release-mutating job for the same version, across a push
+    # and a recovery dispatch alike, so concurrent runs never race the release's
+    # assets. cancel-in-progress stays false: a superseded run must finish, not
+    # abort mid-upload.
+    concurrency:
+      group: release-${{ github.repository }}-v${{ needs.verify.outputs.version }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+    outputs:
+      complete: ${{ steps.prepare.outputs.complete }}
+      release_id: ${{ steps.prepare.outputs.release_id }}
+      release_sha: ${{ steps.prepare.outputs.release_sha }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Read package version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if ! printf '%s\n' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::package.json version must be canonical major.minor.patch"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog
+        id: changelog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node <<'SCRIPT'
           const fs = require('fs');
+          const crypto = require('crypto');
           const version = process.env.VERSION;
-
-          const content = fs.readFileSync('CHANGELOG.md', 'utf8');
-          const lines = content.split('\n');
-
+          const lines = fs.readFileSync('CHANGELOG.md', 'utf8').split('\n');
           let capturing = false;
-          let result = [];
-
+          const result = [];
           for (const line of lines) {
             if (line.trim().startsWith('## ')) {
-              if (capturing) {
-                break;
-              }
+              if (capturing) break;
               if (line.trim() === `## ${version}` || line.trim().startsWith(`## ${version} `)) {
                 capturing = true;
-                continue;
               }
             } else if (capturing) {
               result.push(line);
             }
           }
-
           const changelog = result.join('\n').trim();
-
-          if (!changelog) {
-            console.log(`Warning: No changelog found for version ${version}`);
-          } else {
-            console.log('Extracted changelog:');
-            console.log(changelog);
-          }
-
-          const crypto = require('crypto');
           const delimiter = `EOF_${crypto.randomBytes(16).toString('hex')}`;
-          const outputFile = process.env.GITHUB_OUTPUT;
-          fs.appendFileSync(outputFile, `changelog<<${delimiter}\n${changelog}\n${delimiter}\n`);
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `changelog<<${delimiter}\n${changelog}\n${delimiter}\n`,
+          );
           SCRIPT
 
-      - name: Check which names have this version on npm
-        id: check-version
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if npm view @questdb/mcp-server-questdb@$VERSION version 2>/dev/null; then
-            echo "primary_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "primary_exists=false" >> $GITHUB_OUTPUT
-          fi
-          if npm view @questdb/mcp-bridge@$VERSION version 2>/dev/null; then
-            echo "legacy_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "legacy_exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Publish @questdb/mcp-server-questdb
-        if: steps.check-version.outputs.primary_exists == 'false'
-        run: npm publish --provenance --access public
-
-      - name: Publish legacy alias @questdb/mcp-bridge
-        if: steps.check-version.outputs.legacy_exists == 'false'
-        run: |
-          npm pkg set name=@questdb/mcp-bridge
-          npm publish --provenance --access public --ignore-scripts
-          npm pkg set name=@questdb/mcp-server-questdb
-
-      - name: Create GitHub Release
-        if: steps.check-version.outputs.primary_exists == 'false' || steps.check-version.outputs.legacy_exists == 'false'
-        uses: actions/github-script@v7
-        env:
-          VERSION: ${{ steps.get-version.outputs.version }}
-          CHANGELOG: ${{ steps.extract-changelog.outputs.changelog }}
+      # The org restricts tag creation, so the dedicated App creates the tag
+      # before the draft release. Mint it only after all local source reads.
+      - name: Mint release token
+        id: app-token
+        uses: actions/create-github-app-token@v3
         with:
+          client-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Ensure immutable tag and draft release
+        id: prepare
+        uses: actions/github-script@v8
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const version = process.env.VERSION;
-            const changelog = process.env.CHANGELOG || '';
+            const tag = `v${version}`;
+            const bundleName = `mcp-server-questdb-${version}.mjs`;
+            const expectedAssets = new Set([
+              bundleName,
+              'THIRD_PARTY_NOTICES.txt',
+            ]);
 
-            const existing = await github.rest.repos
-              .getReleaseByTag({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag: `v${version}`,
-              })
-              .catch(() => null);
-            if (existing) {
-              console.log(`Release v${version} already exists, skipping`);
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 },
+            );
+            const matches = releases.filter((release) => release.tag_name === tag);
+            if (matches.length > 1) {
+              throw new Error(`Found ${matches.length} releases for ${tag}; remove duplicates before retrying`);
+            }
+            let release = matches[0] ?? null;
+
+            const readTagCommit = async () => {
+              let object;
+              try {
+                object = (
+                  await github.rest.git.getRef({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    ref: `tags/${tag}`,
+                  })
+                ).data.object;
+              } catch (error) {
+                if (error.status === 404) return null;
+                throw error;
+              }
+              for (let depth = 0; object.type === 'tag' && depth < 10; depth += 1) {
+                object = (
+                  await github.rest.git.getTag({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    tag_sha: object.sha,
+                  })
+                ).data.object;
+              }
+              if (object.type !== 'commit') {
+                throw new Error(`${tag} does not resolve to a commit`);
+              }
+              return object.sha;
+            };
+
+            let releaseSha = await readTagCommit();
+            if (release && !releaseSha) {
+              throw new Error(
+                `${tag} has a release but no git tag. Create the tag at the intended source commit or remove the orphan release before retrying.`,
+              );
+            }
+
+            const hasUsableAsset = (name) =>
+              (release?.assets ?? []).some(
+                (asset) => asset.name === name && asset.state === 'uploaded' && asset.size > 0,
+              );
+            const complete =
+              release !== null &&
+              releaseSha !== null &&
+              !release.draft &&
+              [...expectedAssets].every(hasUsableAsset);
+            if (complete) {
+              core.setOutput('complete', 'true');
+              core.setOutput('release_id', String(release.id));
+              core.setOutput('release_sha', releaseSha);
+              console.log(`${tag} is already complete at ${releaseSha}`);
               return;
             }
 
+            if (releaseSha && releaseSha !== context.sha) {
+              // The tag already exists at another commit and its release is
+              // incomplete. This run is a later push (or a wrong-ref dispatch),
+              // not the one that owns this version — do NOT hard-fail, or every
+              // subsequent push to master stays red until a human intervenes.
+              // Surface it loudly and skip the GitHub-release jobs for this run;
+              // npm (already published) no-ops on its own version check. To
+              // finish the incomplete release, dispatch this workflow at the tag
+              // (context.sha then equals releaseSha and the repair path runs).
+              core.warning(
+                `Incomplete ${tag} points to ${releaseSha}, but this run is at ${context.sha}. ` +
+                `Skipping the GitHub release here; dispatch this workflow at ${tag} to finish it.`,
+              );
+              core.setOutput('complete', 'true');
+              core.setOutput('release_id', release ? String(release.id) : '');
+              core.setOutput('release_sha', releaseSha);
+              return;
+            }
+            if (!releaseSha) {
+              try {
+                await github.rest.git.createRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `refs/tags/${tag}`,
+                  sha: context.sha,
+                });
+              } catch (error) {
+                // A concurrent run may have created it after our read.
+                if (error.status !== 422) throw error;
+              }
+              releaseSha = await readTagCommit();
+              if (releaseSha !== context.sha) {
+                throw new Error(
+                  `${tag} resolved to ${releaseSha ?? 'nothing'} after creation; expected ${context.sha}`,
+                );
+              }
+            }
+
+            const changelog = process.env.CHANGELOG || '_No changelog found for this release._';
             const body = [
               `## @questdb/mcp-server-questdb v${version}`,
               '',
-              changelog || '_No changelog found for this release._',
+              changelog,
+              '',
+              '### Standalone install (no npx / no npm access)',
+              '',
+              `Download \`${bundleName}\` and \`THIRD_PARTY_NOTICES.txt\` below, then:`,
+              '```bash',
+              `node ${bundleName} setup`,
+              '```',
               '',
               `[npm](https://www.npmjs.com/package/@questdb/mcp-server-questdb/v/${version})`,
-              `[npm (legacy name)](https://www.npmjs.com/package/@questdb/mcp-bridge/v/${version})`
+              `[npm (legacy name)](https://www.npmjs.com/package/@questdb/mcp-bridge/v/${version})`,
             ].join('\n');
 
-            await github.rest.repos.createRelease({
+            if (!release) {
+              release = (
+                await github.rest.repos.createRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag_name: tag,
+                  name: tag,
+                  body,
+                  draft: true,
+                  prerelease: false,
+                })
+              ).data;
+              console.log(`Created draft release ${tag}`);
+            } else {
+              // Preserve the release's current draft state — never flip a
+              // published release back to a draft (which would 404 its asset
+              // URLs and hide it from the releases page) just because an asset
+              // is missing. github_release repairs assets in place.
+              release = (
+                await github.rest.repos.updateRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  body,
+                  draft: release.draft,
+                  prerelease: false,
+                })
+              ).data;
+              console.log(`Prepared incomplete release ${tag} for repair`);
+            }
+
+            core.setOutput('complete', 'false');
+            core.setOutput('release_id', String(release.id));
+            core.setOutput('release_sha', releaseSha);
+
+  # Build dependency code without write/OIDC credentials. The tag must resolve
+  # to the exact commit verified above, so provenance never covers a different
+  # tree from the test gate.
+  github_release_bundle:
+    name: Build GitHub Release Assets
+    needs: prepare_github_release
+    if: needs.prepare_github_release.outputs.complete != 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.repository }}-v${{ needs.prepare_github_release.outputs.version }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare_github_release.outputs.release_sha }}
+          persist-credentials: false
+
+      - run: corepack enable
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: yarn
+
+      - run: yarn install --immutable
+
+      - name: Build and verify standalone bundle
+        env:
+          VERSION: ${{ needs.prepare_github_release.outputs.version }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ needs.prepare_github_release.outputs.release_sha }}"
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          yarn bundle
+          test "$(node "out/mcp-server-questdb-$VERSION.mjs" --version)" = "$VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: github-release-${{ needs.prepare_github_release.outputs.version }}
+          path: |
+            out/mcp-server-questdb-${{ needs.prepare_github_release.outputs.version }}.mjs
+            out/THIRD_PARTY_NOTICES.txt
+          if-no-files-found: error
+
+  # Publishes the release from files produced by the read-only build job; it
+  # never checks out or runs project dependency code.
+  github_release:
+    name: Publish GitHub Release
+    needs: [prepare_github_release, github_release_bundle]
+    if: >-
+      always() &&
+      needs.prepare_github_release.outputs.complete != 'true' &&
+      needs.github_release_bundle.result == 'success'
+    runs-on: ubuntu-latest
+    environment: release
+    concurrency:
+      group: release-${{ github.repository }}-v${{ needs.prepare_github_release.outputs.version }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-release-${{ needs.prepare_github_release.outputs.version }}
+          path: out
+
+      - name: Mint release token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Upload assets and publish
+        uses: actions/github-script@v8
+        env:
+          VERSION: ${{ needs.prepare_github_release.outputs.version }}
+          RELEASE_ID: ${{ needs.prepare_github_release.outputs.release_id }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const version = process.env.VERSION;
+            const releaseId = Number(process.env.RELEASE_ID);
+            const bundleName = `mcp-server-questdb-${version}.mjs`;
+            const uploads = [
+              { name: bundleName, path: `out/${bundleName}`, type: 'application/javascript' },
+              { name: 'THIRD_PARTY_NOTICES.txt', path: 'out/THIRD_PARTY_NOTICES.txt', type: 'text/plain' },
+            ].map((upload) => ({
+              ...upload,
+              size: fs.statSync(upload.path).size,
+            }));
+
+            let release = (
+              await github.rest.repos.getRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+              })
+            ).data;
+            // A non-draft release here is an already-published one that lost an
+            // asset; repair it in place (re-upload below) rather than refusing.
+            // prepare no longer flips it to a draft, so this is not reached for
+            // a healthy published release (those short-circuit as complete).
+
+            for (const upload of uploads) {
+              const data = fs.readFileSync(upload.path);
+              const existing = release.assets.find((asset) => asset.name === upload.name);
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  asset_id: existing.id,
+                });
+              }
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+                name: upload.name,
+                data,
+                headers: { 'content-type': upload.type },
+              });
+              console.log(`Uploaded ${upload.name}`);
+            }
+
+            release = (
+              await github.rest.repos.getRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+              })
+            ).data;
+            const invalid = uploads.filter((upload) => {
+              const asset = release.assets.find((candidate) => candidate.name === upload.name);
+              return !asset || asset.state !== 'uploaded' || asset.size !== upload.size;
+            });
+            if (invalid.length) {
+              throw new Error(
+                `Release asset group is incomplete or invalid: ${invalid.map((upload) => upload.name).join(', ')}`,
+              );
+            }
+
+            await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: `v${version}`,
-              name: `v${version}`,
-              body,
+              release_id: releaseId,
               draft: false,
-              prerelease: false
+              prerelease: false,
             });
+            console.log(`Published complete release v${version}`);
 
-            console.log(`Created release v${version}`);
+  # Pack in a read-only job, then publish the tarballs from a credentialed job
+  # that never checks out or runs project dependency code.
+  # npm is bound to the same verified tag commit as the GitHub release: needs
+  # prepare_github_release and checks out its release_sha, so npm can never
+  # publish a version whose tag points at a different tree (or publish at all
+  # when the release preparation failed).
+  npm_build:
+    name: Build NPM Packages
+    needs: [verify, prepare_github_release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_sha: ${{ needs.prepare_github_release.outputs.release_sha }}
+      primary_exists: ${{ steps.check.outputs.primary_exists }}
+      legacy_exists: ${{ steps.check.outputs.legacy_exists }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare_github_release.outputs.release_sha }}
+          persist-credentials: false
 
-  # Runs after npm publishing so the registry can validate the published
-  # tarball; skips by itself when the registry already has this version.
+      - run: corepack enable
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: yarn
+
+      - name: Read package version
+        id: version
+        env:
+          RELEASE_SHA: ${{ needs.prepare_github_release.outputs.release_sha }}
+          EXPECTED_VERSION: ${{ needs.prepare_github_release.outputs.version }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          VERSION=$(node -p "require('./package.json').version")
+          if ! printf '%s\n' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::package.json version must be canonical major.minor.patch"
+            exit 1
+          fi
+          test "$VERSION" = "$EXPECTED_VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check published versions
+        id: check
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          check_package() {
+            package="$1"
+            output_name="$2"
+            if output=$(npm view "$package@$VERSION" version 2>&1); then
+              printf '%s\n' "$output"
+              echo "$output_name=true" >> "$GITHUB_OUTPUT"
+            elif printf '%s\n' "$output" | grep -q 'E404'; then
+              echo "$package@$VERSION is not published"
+              echo "$output_name=false" >> "$GITHUB_OUTPUT"
+            else
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+          }
+          check_package "@questdb/mcp-server-questdb" primary_exists
+          check_package "@questdb/mcp-bridge" legacy_exists
+
+      - name: Install and build
+        if: steps.check.outputs.primary_exists == 'false' || steps.check.outputs.legacy_exists == 'false'
+        run: |
+          yarn install --immutable
+          yarn build
+
+      - name: Pack primary package
+        if: steps.check.outputs.primary_exists == 'false'
+        run: |
+          mkdir -p npm-artifacts/primary
+          npm pack --ignore-scripts --pack-destination npm-artifacts/primary
+
+      - name: Pack legacy package
+        if: steps.check.outputs.legacy_exists == 'false'
+        run: |
+          mkdir -p npm-artifacts/legacy
+          npm pkg set name=@questdb/mcp-bridge
+          npm pack --ignore-scripts --pack-destination npm-artifacts/legacy
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.primary_exists == 'false' || steps.check.outputs.legacy_exists == 'false'
+        with:
+          name: npm-packages-${{ steps.version.outputs.version }}
+          path: npm-artifacts
+          if-no-files-found: error
+
+  npm_publish:
+    name: Publish to NPM
+    needs: npm_build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.repository }}-v${{ needs.npm_build.outputs.version }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        if: needs.npm_build.outputs.primary_exists == 'false' || needs.npm_build.outputs.legacy_exists == 'false'
+        with:
+          name: npm-packages-${{ needs.npm_build.outputs.version }}
+          path: npm-artifacts
+
+      # npm_build is intentionally read-only and may overlap another run. Once
+      # this job owns the version-scoped mutation lock, refresh registry state
+      # so a package published by the preceding queued run becomes a no-op.
+      - name: Recheck published versions
+        id: publish-check
+        if: needs.npm_build.outputs.primary_exists == 'false' || needs.npm_build.outputs.legacy_exists == 'false'
+        env:
+          VERSION: ${{ needs.npm_build.outputs.version }}
+        run: |
+          check_package() {
+            package="$1"
+            output_name="$2"
+            if output=$(npm view "$package@$VERSION" version 2>&1); then
+              printf '%s\n' "$output"
+              echo "$output_name=true" >> "$GITHUB_OUTPUT"
+            elif printf '%s\n' "$output" | grep -q 'E404'; then
+              echo "$package@$VERSION is not published"
+              echo "$output_name=false" >> "$GITHUB_OUTPUT"
+            else
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+          }
+          check_package "@questdb/mcp-server-questdb" primary_exists
+          check_package "@questdb/mcp-bridge" legacy_exists
+
+      # npm provenance is bound to the triggering workflow's immutable source
+      # context, not to the ref used by npm_build's checkout. A recovery run
+      # from a later master commit must therefore stop before publishing and be
+      # re-dispatched at the release tag.
+      - name: Verify provenance source
+        if: steps.publish-check.outputs.primary_exists == 'false' || steps.publish-check.outputs.legacy_exists == 'false'
+        env:
+          RELEASE_SHA: ${{ needs.npm_build.outputs.release_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          VERSION: ${{ needs.npm_build.outputs.version }}
+        run: |
+          if [ "$WORKFLOW_SHA" != "$RELEASE_SHA" ]; then
+            echo "::error::Cannot publish npm v$VERSION from workflow SHA $WORKFLOW_SHA: the immutable release is at $RELEASE_SHA. Re-dispatch this workflow at tag v$VERSION so npm provenance identifies the packaged source."
+            exit 1
+          fi
+
+      - name: Publish primary package
+        if: steps.publish-check.outputs.primary_exists == 'false'
+        run: npm publish npm-artifacts/primary/*.tgz --provenance --access public --ignore-scripts
+
+      - name: Publish legacy package
+        if: steps.publish-check.outputs.legacy_exists == 'false'
+        run: npm publish npm-artifacts/legacy/*.tgz --provenance --access public --ignore-scripts
+
   registry:
     name: Publish to MCP Registry
-    needs: publish
+    needs: [npm_publish, prepare_github_release]
+    concurrency:
+      group: release-${{ github.repository }}-v${{ needs.prepare_github_release.outputs.version }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       id-token: write
       contents: read
     uses: ./.github/workflows/mcp-registry.yml
+    with:
+      release_sha: ${{ needs.prepare_github_release.outputs.release_sha }}
+      version: ${{ needs.prepare_github_release.outputs.version }}

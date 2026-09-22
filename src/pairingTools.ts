@@ -1,4 +1,14 @@
 import { bridgePackageForVersion } from "./bridgePackage.js"
+import {
+  bundleDownloadUrl,
+  bundleInstallPath,
+  commandArg,
+  commandShell,
+  commandShellLabel,
+  DISTRIBUTION_CHANNEL,
+  type DistributionChannel,
+} from "./distribution.js"
+import { requireBridgeVersion } from "./protocolVersion.js"
 import type { MCPPermissions, ToolResultPayload, ToolSchema } from "./types.js"
 
 export const CONNECT_TOOL: ToolSchema = {
@@ -56,7 +66,7 @@ export const WAIT_TOOL: ToolSchema = {
     "If the bridge version doesn't match what the web console expects, " +
     "the success payload includes a `warning`, a pre-rendered `userMessage`, " +
     "and `assistantNextActions`; you MUST show the `userMessage` to the user " +
-    "verbatim AND suggest running the exact `npx … upgrade` command it " +
+    "verbatim AND suggest the exact upgrade instruction it " +
     "contains (offer to run it for them) before proceeding. " +
     "If pairing is refused outright for an incompatible bridge, the result " +
     "is `{paired:false, reason:'incompatible_bridge', userMessage, " +
@@ -121,6 +131,7 @@ export type WaitForPairResult =
   | { paired: false; reason: "incompatible"; incompatible: VersionMismatch }
 
 export type PairingToolsContext = {
+  beginPairingAttempt: () => void
   buildDeepLink: () => string
   getCredentials: () => { wsUrl: string; token: string }
   getPairingState: () => PairingSnapshot
@@ -134,57 +145,127 @@ const MAX_PAIRING_POLL_TIMEOUT_MS = 50_000
 const MIN_PAIRING_POLL_TIMEOUT_MS = 1_000
 const RECOMMENDED_MAX_RETRIES = 10
 
+type UpgradeCommand = {
+  command: string
+  args: string[]
+  shell: "posix" | "powershell"
+  rendered: string
+  downloadUrl?: string
+  installPath?: string
+}
+
+const buildUpgradeCommand = (
+  version: string,
+  channel: DistributionChannel,
+): UpgradeCommand => {
+  const target = requireBridgeVersion(version)
+  const shell = commandShell()
+  if (channel !== "standalone") {
+    const spec = `${bridgePackageForVersion(target)}@${target}`
+    return {
+      command: "npx",
+      args: [spec, "upgrade"],
+      shell,
+      rendered: `npx ${spec} upgrade`,
+    }
+  }
+  const installPath = bundleInstallPath(target, channel)
+  return {
+    command: "node",
+    args: [installPath, "upgrade"],
+    shell,
+    rendered: `node ${commandArg(installPath, shell)} upgrade`,
+    downloadUrl: bundleDownloadUrl(target),
+    installPath,
+  }
+}
+
+// The exact version-switch instruction for a target version, rendered per
+// distribution channel. The target bundle is saved beside the current durable
+// install.
+const upgradeInstruction = (
+  version: string,
+  channel: DistributionChannel = DISTRIBUTION_CHANNEL,
+): string => {
+  const upgrade = buildUpgradeCommand(version, channel)
+  if (channel !== "standalone") return `run \`${upgrade.rendered}\``
+  return (
+    `download ${upgrade.downloadUrl} to ${upgrade.installPath} and in ` +
+    `${commandShellLabel(upgrade.shell)} run \`${upgrade.rendered}\``
+  )
+}
+
 // Pre-rendered text the assistant SHOULD show the user verbatim — same forcing
 // pattern as get_pairing_credentials' `userMessage`. `expectedBridgeVersion` is
-// the exact npm version the console was verified against, so it doubles as the
+// the exact version the console was verified against, so it doubles as the
 // pin to install.
-const buildVersionUserMessage = (m: VersionMismatch): string => {
+const buildVersionUserMessage = (
+  m: VersionMismatch,
+  channel: DistributionChannel,
+): string => {
   const pkg = bridgePackageForVersion(m.expectedBridgeVersion)
+  const instruction = upgradeInstruction(m.expectedBridgeVersion, channel)
   return (
     `Web Console expects ${pkg} v${m.expectedBridgeVersion} but ` +
-    `you're running v${m.bridgeVersion}. Run ` +
-    `\`npx ${pkg}@${m.expectedBridgeVersion} upgrade\`, then restart ` +
+    `you're running v${m.bridgeVersion}. ` +
+    `${instruction.charAt(0).toUpperCase()}${instruction.slice(1)}, then restart ` +
     `this coding agent (the running bridge keeps the old version until restart).`
   )
 }
 
-const buildVersionWarning = (m: VersionMismatch): string =>
+const buildVersionWarning = (
+  m: VersionMismatch,
+  channel: DistributionChannel,
+  paired = true,
+): string =>
   `version_mismatch (bridge v${m.bridgeVersion} vs console-expected ` +
   `v${m.expectedBridgeVersion}): show the \`userMessage\` to the user verbatim ` +
-  `and offer to run the upgrade command for them. Newer features need the matching bridge; existing tools keep working meanwhile.`
+  `and offer to run the ${channel === "standalone" ? "standalone download-and-upgrade steps" : "version-switch command"} for them. ` +
+  (paired
+    ? `Newer features need the matching bridge; existing tools keep working meanwhile.`
+    : `Pairing was refused; no console tools are available until the versions match.`)
 
 // Ordered imperatives so weaker models can't skim past the prose `warning`:
 // they MUST tell the user and MUST surface the `upgrade` command as a suggestion.
-const buildVersionMismatchActions = (m: VersionMismatch): string[] => [
+const buildVersionMismatchActions = (
+  m: VersionMismatch,
+  channel: DistributionChannel,
+): string[] => [
   "You MUST show the `userMessage` text to the user verbatim — they need to know the bridge is out of date.",
-  `You MUST suggest running \`npx ${bridgePackageForVersion(m.expectedBridgeVersion)}@${m.expectedBridgeVersion} upgrade\` and offer to run it for them — it re-pins your coding-agent config to the matching bridge version.`,
+  `You MUST suggest the version switch: ${upgradeInstruction(m.expectedBridgeVersion, channel)} — offer to carry it out for them; it re-pins your coding-agent config to the matching bridge version.`,
   "After it succeeds, tell the user to restart this coding agent so the upgraded bridge launches (the running process stays on the old version until restart).",
 ]
 
 const attachVersionMismatch = (
   payload: Record<string, unknown>,
   m: VersionMismatch,
+  channel: DistributionChannel,
 ): void => {
-  payload.warning = buildVersionWarning(m)
-  payload.userMessage = buildVersionUserMessage(m)
-  payload.assistantNextActions = buildVersionMismatchActions(m)
+  payload.warning = buildVersionWarning(m, channel)
+  payload.userMessage = buildVersionUserMessage(m, channel)
+  payload.assistantNextActions = buildVersionMismatchActions(m, channel)
+  payload.upgradeCommand = buildUpgradeCommand(m.expectedBridgeVersion, channel)
 }
 
 // Returned when the console tried to pair but its expected bridge major differs
 // — pairing was refused, so this is a terminal error for the agent: surface the
 // upgrade instruction and stop polling rather than burning retries.
-const buildIncompatiblePayload = (inc: VersionMismatch): ToolResultPayload => ({
+const buildIncompatiblePayload = (
+  inc: VersionMismatch,
+  channel: DistributionChannel,
+): ToolResultPayload => ({
   content: [
     {
       type: "text",
       text: JSON.stringify({
         paired: false,
         reason: "incompatible_bridge",
-        warning: buildVersionWarning(inc),
-        userMessage: buildVersionUserMessage(inc),
+        warning: buildVersionWarning(inc, channel, false),
+        userMessage: buildVersionUserMessage(inc, channel),
+        upgradeCommand: buildUpgradeCommand(inc.expectedBridgeVersion, channel),
         assistantNextActions: [
           "Show the `userMessage` text to the user verbatim.",
-          `Offer to run \`npx ${bridgePackageForVersion(inc.expectedBridgeVersion)}@${inc.expectedBridgeVersion} upgrade\` for them — it re-pins your coding-agent config to the matching bridge version.`,
+          `Suggest the version switch: ${upgradeInstruction(inc.expectedBridgeVersion, channel)} — offer to carry it out for them; it re-pins your coding-agent config to the matching bridge version.`,
           "After it succeeds, have them restart this coding agent so the new bridge launches.",
           "Stop calling wait_for_pairing — pairing cannot succeed until the bridge version is updated.",
         ],
@@ -222,14 +303,12 @@ type Counters = { waitRetries: number }
 export const createPairingToolHandlers = (
   ctx: PairingToolsContext,
   counters: Counters = { waitRetries: 0 },
+  channel: DistributionChannel = DISTRIBUTION_CHANNEL,
 ) => {
   const handleConnectWebConsole = async (
     args?: Record<string, unknown>,
   ): Promise<ToolResultPayload> => {
-    const state = ctx.getPairingState()
-    if (!state.paired && state.incompatible) {
-      return buildIncompatiblePayload(state.incompatible)
-    }
+    let state = ctx.getPairingState()
     if (state.paired) {
       const payload: Record<string, unknown> = {
         paired: true,
@@ -239,11 +318,19 @@ export const createPairingToolHandlers = (
           "Already paired with the QuestDB Web Console; notebook tools are available.",
       }
       if (state.versionMismatch) {
-        attachVersionMismatch(payload, state.versionMismatch)
+        attachVersionMismatch(payload, state.versionMismatch, channel)
       }
       return {
         content: [{ type: "text", text: JSON.stringify(payload) }],
       }
+    }
+    // Calling get_pairing_credentials is an explicit request to try again.
+    // Supersede a cached refusal from an already-closed console before minting
+    // and presenting credentials for the next browser.
+    ctx.beginPairingAttempt()
+    state = ctx.getPairingState()
+    if (!state.paired && state.incompatible) {
+      return buildIncompatiblePayload(state.incompatible, channel)
     }
     try {
       await ctx.ensureListening()
@@ -253,7 +340,8 @@ export const createPairingToolHandlers = (
     const url = ctx.buildDeepLink()
     const { wsUrl, token } = ctx.getCredentials()
     const autoOpen = args?.auto_open_browser !== false
-    const opened = autoOpen && ctx.openBrowser ? await ctx.openBrowser(url) : false
+    const opened =
+      autoOpen && ctx.openBrowser ? await ctx.openBrowser(url) : false
     const browserOpened = opened
       ? "Browser automatically opened with the pairing deep link — the user may already see the pairing dialog."
       : autoOpen
@@ -316,7 +404,7 @@ export const createPairingToolHandlers = (
     const initial = ctx.getPairingState()
     if (!initial.paired && initial.incompatible) {
       counters.waitRetries = 0
-      return buildIncompatiblePayload(initial.incompatible)
+      return buildIncompatiblePayload(initial.incompatible, channel)
     }
     if (initial.paired) {
       counters.waitRetries = 0
@@ -326,7 +414,7 @@ export const createPairingToolHandlers = (
         permissions: initial.permissions,
       }
       if (initial.versionMismatch) {
-        attachVersionMismatch(payload, initial.versionMismatch)
+        attachVersionMismatch(payload, initial.versionMismatch, channel)
       }
       return {
         content: [{ type: "text", text: JSON.stringify(payload) }],
@@ -343,7 +431,7 @@ export const createPairingToolHandlers = (
         permissions: result.permissions,
       }
       if (result.versionMismatch) {
-        attachVersionMismatch(payload, result.versionMismatch)
+        attachVersionMismatch(payload, result.versionMismatch, channel)
       }
       return {
         content: [{ type: "text", text: JSON.stringify(payload) }],
@@ -351,7 +439,7 @@ export const createPairingToolHandlers = (
     }
     if (result.reason === "incompatible") {
       counters.waitRetries = 0
-      return buildIncompatiblePayload(result.incompatible)
+      return buildIncompatiblePayload(result.incompatible, channel)
     }
     if (result.reason === "rate_limited") {
       return {

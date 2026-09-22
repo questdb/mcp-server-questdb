@@ -364,29 +364,47 @@ describe("BridgeSession — pairing handshake", () => {
     const { session } = makeSession()
     const browser = makeFakeBrowser()
     session.attachBrowser(browser.conn)
-    sendHello(
-      session,
-      "the-token",
-      helloTools,
-      grantedPermissions,
-      "999.0.0",
-    )
+    sendHello(session, "the-token", helloTools, grantedPermissions, "999.0.0")
     expect(browser.closed?.code).toBe(WS_CLOSE_CODES.major_version_mismatch)
     expect(browser.closed?.reason).toBe("major_version_mismatch")
     expect(session.getState()).toBe("S0")
   })
 
+  it.each([
+    "0.4",
+    " 0.4.0",
+    "0.4.0 ",
+    "0.4.0/../../attacker",
+    "0.4.0-01",
+    "0.4.0-rc.1",
+    "0.4.0+build.1",
+  ])(
+    "rejects malformed expectedBridgeVersion %j at the protocol boundary",
+    (expectedBridgeVersion) => {
+      const { session } = makeSession()
+      const browser = makeFakeBrowser()
+      session.attachBrowser(browser.conn)
+      sendHello(
+        session,
+        "the-token",
+        helloTools,
+        grantedPermissions,
+        expectedBridgeVersion,
+      )
+      expect(browser.closed).toEqual({
+        code: WS_CLOSE_CODES.protocol_violation,
+        reason: "malformed_expected_bridge_version",
+      })
+      expect(session.getState()).toBe("S0")
+      expect(session.getPairingSnapshot()).toEqual({ paired: false })
+    },
+  )
+
   it("remembers a refused major-mismatch console so the pairing tools can surface an upgrade notice", async () => {
     const { session } = makeSession()
     const browser = makeFakeBrowser()
     session.attachBrowser(browser.conn)
-    sendHello(
-      session,
-      "the-token",
-      helloTools,
-      grantedPermissions,
-      "999.0.0",
-    )
+    sendHello(session, "the-token", helloTools, grantedPermissions, "999.0.0")
     const snap = session.getPairingSnapshot()
     expect(snap.paired).toBe(false)
     if (snap.paired) throw new Error("expected unpaired")
@@ -410,13 +428,7 @@ describe("BridgeSession — pairing handshake", () => {
     // Park a waiter first — this is the common flow: the agent calls
     // wait_for_pairing and blocks, THEN the user opens an incompatible console.
     const pending = session.waitForPair(50_000)
-    sendHello(
-      session,
-      "the-token",
-      helloTools,
-      grantedPermissions,
-      "999.0.0",
-    )
+    sendHello(session, "the-token", helloTools, grantedPermissions, "999.0.0")
     const waited = await pending
     expect(waited.paired).toBe(false)
     if (waited.paired || "rateLimited" in waited) {
@@ -1034,7 +1046,7 @@ describe("BridgeSession — disconnect", () => {
     expect(session.getState()).toBe("S1")
   })
 
-  it("clears a refused console's incompatible flag on disconnect so pairing can resume", async () => {
+  it("keeps a refused console's incompatible flag after disconnect, and a compatible console clears it", async () => {
     const { session } = makeSession()
     const a = makeFakeBrowser()
     session.attachBrowser(a.conn)
@@ -1043,19 +1055,57 @@ describe("BridgeSession — disconnect", () => {
     const before = session.getPairingSnapshot()
     if (before.paired) throw new Error("expected unpaired")
     expect(before.incompatible).toBeTruthy()
-    // The refused socket drops. The incompatible fact is per-connection and must
-    // not outlive it, or the agent is told to stop polling forever.
+    // A major mismatch closes the socket, which lands back in transitionToS0.
+    // The incompatible fact must SURVIVE that self-requested close, or the
+    // pairing tools surface a bare timeout instead of the upgrade message.
     session.handleSocketClose(a.conn)
     const after = session.getPairingSnapshot()
     if (after.paired) throw new Error("expected unpaired")
-    expect(after.incompatible).toBeUndefined()
-    // A fresh waiter now parks for a new console instead of short-circuiting.
-    const pending = session.waitForPair(50_000)
+    expect(after.incompatible).toBeTruthy()
+    // wait_for_pairing now short-circuits to the actionable incompatible result
+    // instead of parking for the full timeout.
+    const refused = await session.waitForPair(50_000)
+    if (refused.paired || "rateLimited" in refused)
+      throw new Error("expected incompatible")
+    expect(refused.incompatible).toBeTruthy()
+    // A compatible console then pairs; the successful hello clears the flag.
     const b = makeFakeBrowser()
     session.attachBrowser(b.conn)
     sendHello(session)
-    const res = await pending
+    const res = await session.waitForPair(50_000)
     expect(res.paired).toBe(true)
+  })
+
+  it("clears a cached incompatibility when credentials start a fresh attempt", () => {
+    const { session } = makeSession()
+    const rejected = makeFakeBrowser()
+    session.attachBrowser(rejected.conn)
+    sendHello(session, "the-token", helloTools, grantedPermissions, "999.0.0")
+    session.handleSocketClose(rejected.conn)
+    const before = session.getPairingSnapshot()
+    if (before.paired) throw new Error("expected unpaired")
+    expect(before.incompatible).toBeTruthy()
+
+    session.beginPairingAttempt()
+
+    const after = session.getPairingSnapshot()
+    if (after.paired) throw new Error("expected unpaired")
+    expect(after.incompatible).toBeUndefined()
+  })
+
+  it("clears a cached incompatibility as soon as a fresh browser is accepted", () => {
+    const { session } = makeSession()
+    const rejected = makeFakeBrowser()
+    session.attachBrowser(rejected.conn)
+    sendHello(session, "the-token", helloTools, grantedPermissions, "999.0.0")
+    session.handleSocketClose(rejected.conn)
+
+    const fresh = makeFakeBrowser()
+    expect(session.attachBrowser(fresh.conn)).toBe("accepted")
+
+    const duringHello = session.getPairingSnapshot()
+    if (duringHello.paired) throw new Error("expected unpaired handshake")
+    expect(duringHello.incompatible).toBeUndefined()
   })
 
   it("ignores a stale close from a previously-replaced browser", () => {

@@ -1,6 +1,11 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { BRIDGE_PACKAGE } from "../bridgePackage.js"
+import {
+  DISTRIBUTION_CHANNEL,
+  launchSpec,
+  type DistributionChannel,
+} from "../distribution.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
 
 export type AgentId = "claude" | "codex" | "cursor" | "opencode" | "gemini"
@@ -28,8 +33,8 @@ export const SERVER_NAME = "questdb"
 // Pin the spawned bridge to the version that ran setup: a console expects a
 // specific bridge version, so `npx @questdb/mcp-server-questdb@X setup` must
 // write a config that launches @X (not whatever "latest" later resolves to).
+// On the standalone channel the pin is the bundle file itself.
 export const BRIDGE_PACKAGE_SPEC = `${BRIDGE_PACKAGE}@${MCP_BRIDGE_VERSION}`
-const NPX_ARGS = ["-y", BRIDGE_PACKAGE_SPEC]
 
 const hasEnv = (env: BridgeEnv): boolean => Object.keys(env).length > 0
 
@@ -45,81 +50,81 @@ const claudeGlobalConfigPath = (): string =>
 const codexHome = (): string =>
   process.env.CODEX_HOME || join(homedir(), ".codex")
 
-const jsonStdioEntry = (env: BridgeEnv): Record<string, unknown> => ({
-  command: "npx",
-  args: [...NPX_ARGS],
-  ...(hasEnv(env) ? { env } : {}),
-})
-
-export const buildAgents = (): Record<AgentId, AgentConfig> => ({
-  claude: {
-    id: "claude",
-    displayName: "Claude Code",
-    format: "json",
-    configPaths: [claudeGlobalConfigPath()],
-    configKey: "mcpServers",
-    envKey: "env",
-    buildEntry: jsonStdioEntry,
-    detectPaths: [claudeGlobalConfigPath(), claudeConfigDir()],
-  },
-  codex: {
-    id: "codex",
-    displayName: "Codex",
-    // config.toml is written by `codex mcp add`, never by us; configPaths is
-    // only the display path in reports. Honors CODEX_HOME like codex does.
-    format: "codex-cli",
-    configPaths: [join(codexHome(), "config.toml")],
-    configKey: "mcp_servers",
-    envKey: "env",
-    buildEntry: (env) => ({
-      command: "npx",
-      args: [...NPX_ARGS],
-      ...(hasEnv(env) ? { env } : {}),
-    }),
-    detectPaths: [codexHome()],
-  },
-  cursor: {
-    id: "cursor",
-    displayName: "Cursor",
-    format: "json",
-    configPaths: [join(homedir(), ".cursor", "mcp.json")],
-    configKey: "mcpServers",
-    envKey: "env",
-    buildEntry: jsonStdioEntry,
-    detectPaths: [join(homedir(), ".cursor")],
-  },
-  opencode: {
-    id: "opencode",
-    displayName: "OpenCode",
-    format: "json",
-    // OpenCode accepts several config filenames; write to whichever exists.
-    configPaths: [
-      join(homedir(), ".config", "opencode", "opencode.json"),
-      join(homedir(), ".config", "opencode", "opencode.jsonc"),
-      join(homedir(), ".config", "opencode", ".opencode.json"),
-      join(homedir(), ".config", "opencode", ".opencode.jsonc"),
-    ],
-    configKey: "mcp",
-    envKey: "environment",
-    buildEntry: (env) => ({
-      type: "local",
-      command: ["npx", ...NPX_ARGS],
-      ...(hasEnv(env) ? { environment: env } : {}),
-      enabled: true,
-    }),
-    detectPaths: [join(homedir(), ".config", "opencode")],
-  },
-  gemini: {
-    id: "gemini",
-    displayName: "Gemini CLI",
-    format: "json",
-    configPaths: [join(homedir(), ".gemini", "settings.json")],
-    configKey: "mcpServers",
-    envKey: "env",
-    buildEntry: jsonStdioEntry,
-    detectPaths: [join(homedir(), ".gemini")],
-  },
-})
+export const buildAgents = (
+  channel: DistributionChannel = DISTRIBUTION_CHANNEL,
+): Record<AgentId, AgentConfig> => {
+  const spec = launchSpec(channel)
+  const jsonStdioEntry = (env: BridgeEnv): Record<string, unknown> => ({
+    command: spec.command,
+    args: [...spec.args],
+    ...(hasEnv(env) ? { env } : {}),
+  })
+  return {
+    claude: {
+      id: "claude",
+      displayName: "Claude Code",
+      format: "json",
+      configPaths: [claudeGlobalConfigPath()],
+      configKey: "mcpServers",
+      envKey: "env",
+      buildEntry: jsonStdioEntry,
+      detectPaths: [claudeGlobalConfigPath(), claudeConfigDir()],
+    },
+    codex: {
+      id: "codex",
+      displayName: "Codex",
+      // config.toml is written by `codex mcp add`, never by us; configPaths is
+      // only the display path in reports. Honors CODEX_HOME like codex does.
+      format: "codex-cli",
+      configPaths: [join(codexHome(), "config.toml")],
+      configKey: "mcp_servers",
+      envKey: "env",
+      buildEntry: jsonStdioEntry,
+      detectPaths: [codexHome()],
+    },
+    cursor: {
+      id: "cursor",
+      displayName: "Cursor",
+      format: "json",
+      configPaths: [join(homedir(), ".cursor", "mcp.json")],
+      configKey: "mcpServers",
+      envKey: "env",
+      buildEntry: jsonStdioEntry,
+      detectPaths: [join(homedir(), ".cursor")],
+    },
+    opencode: {
+      id: "opencode",
+      displayName: "OpenCode",
+      format: "json",
+      // OpenCode accepts several config filenames; write to whichever exists.
+      configPaths: [
+        join(homedir(), ".config", "opencode", "opencode.json"),
+        join(homedir(), ".config", "opencode", "opencode.jsonc"),
+        join(homedir(), ".config", "opencode", ".opencode.json"),
+        join(homedir(), ".config", "opencode", ".opencode.jsonc"),
+      ],
+      configKey: "mcp",
+      envKey: "environment",
+      buildEntry: (env) => ({
+        type: "local",
+        command: [spec.command, ...spec.args],
+        ...(hasEnv(env) ? { environment: env } : {}),
+        enabled: true,
+      }),
+      detectPaths: [join(homedir(), ".config", "opencode")],
+    },
+    gemini: {
+      id: "gemini",
+      displayName: "Gemini CLI",
+      format: "json",
+      configPaths: [join(homedir(), ".gemini", "settings.json")],
+      configKey: "mcpServers",
+      envKey: "env",
+      buildEntry: jsonStdioEntry,
+      detectPaths: [join(homedir(), ".gemini")],
+    },
+  }
+}
 
 export const ALL_AGENT_IDS: AgentId[] = [
   "claude",

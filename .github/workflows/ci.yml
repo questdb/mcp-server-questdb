@@ -8,12 +8,19 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    strategy:
+      # 22 is the engines floor (package.json engines >=22) — testing it keeps
+      # the claim honest; 24 matches the release workflow.
+      matrix:
+        node-version: ["22", "24"]
     steps:
-      - uses: actions/checkout@v4
-      - run: corepack enable
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
         with:
-          node-version: "24"
+          persist-credentials: false
+      - run: corepack enable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
           cache: yarn
       - run: yarn install --immutable
       - name: Verify src/consts/shared-definitions.json matches questdb/ui

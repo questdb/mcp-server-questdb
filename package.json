@@ -27,7 +27,8 @@
   "type": "module",
   "bin": "./dist/index.js",
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && cp -R src/consts dist/consts && chmod +x dist/index.js",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && cp -R src/consts/. dist/consts/ && test -f dist/consts/shared-definitions.json && chmod +x dist/index.js",
+    "bundle": "node src/scripts/bundle.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src",
@@ -63,6 +64,7 @@
     "@inquirer/testing": "^3.3.9",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.10",
+    "esbuild": "^0.24.0",
     "eslint": "^10.0.0",
     "globals": "^17.0.0",
     "prettier": "^3.3.0",
