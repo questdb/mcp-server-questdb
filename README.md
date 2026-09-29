@@ -1,6 +1,6 @@
 # QuestDB MCP Server
 
-An MCP server that connects coding agents (Claude Code, Codex, Cursor, OpenCode …) to a
+An MCP server that connects coding agents (Claude Code, Codex, Cursor, OpenCode, Gemini CLI) to a
 running QuestDB Web Console. The agent gets tools to create notebook
 cells, run queries, and build charts. Every action executes in the
 browser against your already-established QuestDB session.
