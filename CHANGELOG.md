@@ -5,6 +5,13 @@ All notable changes to `@questdb/mcp-server-questdb` (formerly
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.5.0 - 2026-09-30
+### Added
+- publish standalone GitHub release bundle [#5](https://github.com/questdb/mcp-server-questdb/pull/5)
+
+### Changed
+- update shared-definitions.json with live views, semantic cell dimensions and result grid highlight rules [#8](https://github.com/questdb/mcp-server-questdb/pull/8)
+
 ## 0.4.0 - 2026-08-13
 ### Changed
 - update shared-definitions.json with notebook-level autorefresh [#2](https://github.com/questdb/mcp-server-questdb/pull/2)
