@@ -54,9 +54,12 @@ describe("bundledTools", () => {
       "type",
       "mode",
       "auto_refresh",
-      "is_view_maximized",
+      "editor_height",
+      "result_height",
+      "view",
       "chart_config",
       "grid",
+      "highlight_config",
     ])
     expect(tool.inputSchema.required).toEqual([
       "buffer_id",
