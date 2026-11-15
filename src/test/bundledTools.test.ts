@@ -127,6 +127,24 @@ describe("bundledTools", () => {
     }
   })
 
+  it("exposes tab management tools for every tab kind", () => {
+    for (const name of [
+      "archive_tab",
+      "restore_tab",
+      "activate_tab",
+      "delete_tab",
+    ]) {
+      const tool = BUNDLED_FUNCTIONAL_TOOLS.find((t) => t.name === name)
+      if (!tool) throw new Error(`${name} missing`)
+      expect(tool.inputSchema).toMatchObject({ required: ["buffer_id"] })
+    }
+    const rename = BUNDLED_FUNCTIONAL_TOOLS.find((t) => t.name === "rename_tab")
+    expect(rename?.inputSchema).toMatchObject({
+      required: ["buffer_id", "label"],
+    })
+    expect(BUNDLED_TOOL_NAMES.has("delete_notebook")).toBe(false)
+  })
+
   it("tool names are unique", () => {
     const names = BUNDLED_FUNCTIONAL_TOOLS.map((t) => t.name)
     expect(new Set(names).size).toBe(names.length)
