@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import {
   BUNDLED_FUNCTIONAL_TOOLS,
   BUNDLED_TOOL_NAMES,
@@ -95,6 +96,8 @@ describe("bundledTools", () => {
       "x_column",
       "queries",
       "right_axis",
+      "horizontal",
+      "thresholds",
     ])
     const props = tool.inputSchema.properties as Record<string, unknown>
     const queries = props.queries as { items: { required: string[] } }
@@ -111,6 +114,9 @@ describe("bundledTools", () => {
       "band",
       "range",
       "box",
+      "percent_stack",
+      "pie_shape",
+      "scatter",
     ])
   })
 
@@ -156,5 +162,47 @@ describe("bundledTools", () => {
   it("tool names are unique", () => {
     const names = BUNDLED_FUNCTIONAL_TOOLS.map((t) => t.name)
     expect(new Set(names).size).toBe(names.length)
+  })
+
+  it("set_cell_chart_config accepts null for every nullable option", () => {
+    // Given the tool's schema, as the bridge validates calls
+    const tool = BUNDLED_FUNCTIONAL_TOOLS.find(
+      (t) => t.name === "set_cell_chart_config",
+    )
+    if (!tool) throw new Error("set_cell_chart_config missing")
+    const validate = new AjvJsonSchemaValidator().getValidator(
+      tool.inputSchema as Record<string, unknown>,
+    )
+    const query = {
+      type: "line",
+      y_columns: ["v"],
+      ohlc: null,
+      partition_by_column: null,
+      axis: null,
+      enabled: null,
+      name: null,
+      events: null,
+      heatmap: null,
+      band: null,
+      range: null,
+      box: null,
+      percent_stack: null,
+      pie_shape: null,
+      scatter: null,
+    }
+
+    // When an agent leaves every option alone
+    const result = validate({
+      buffer_id: 1,
+      cell_id: "c",
+      x_column: null,
+      queries: [query],
+      right_axis: null,
+      horizontal: null,
+      thresholds: null,
+    })
+
+    // Then
+    expect(result.valid).toBe(true)
   })
 })
