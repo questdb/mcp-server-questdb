@@ -60,6 +60,9 @@ describe("bundledTools", () => {
       "chart_config",
       "grid",
       "highlight_config",
+      "formats",
+      "interactions",
+      "grid_mode",
     ])
     expect(tool.inputSchema.required).toEqual([
       "buffer_id",
@@ -68,6 +71,8 @@ describe("bundledTools", () => {
       "maximized_cell_id",
       "variables",
       "cells",
+      "chart_types",
+      "chart_sync",
     ])
   })
 
@@ -101,7 +106,24 @@ describe("bundledTools", () => {
       "axis",
       "enabled",
       "name",
+      "events",
     ])
+  })
+
+  it("ships the dashboard tools", () => {
+    const names = BUNDLED_FUNCTIONAL_TOOLS.map((t) => t.name)
+    for (const name of [
+      "set_cell_visual",
+      "set_cell_custom_chart",
+      "set_cell_formats",
+      "set_cell_interactions",
+      "define_chart_type",
+      "get_chart_type",
+      "delete_chart_type",
+      "set_notebook_chart_sync",
+    ]) {
+      expect(names).toContain(name)
+    }
   })
 
   it("meta-tool descriptions carry the BRIDGE_NOT_PAIRED recovery prefix", () => {
