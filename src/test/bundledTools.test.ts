@@ -107,6 +107,10 @@ describe("bundledTools", () => {
       "enabled",
       "name",
       "events",
+      "heatmap",
+      "band",
+      "range",
+      "box",
     ])
   })
 
