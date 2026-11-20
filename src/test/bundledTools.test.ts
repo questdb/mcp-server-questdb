@@ -171,7 +171,7 @@ describe("bundledTools", () => {
     )
     if (!tool) throw new Error("set_cell_chart_config missing")
     const validate = new AjvJsonSchemaValidator().getValidator(
-      tool.inputSchema as Record<string, unknown>,
+      tool.inputSchema,
     )
     const query = {
       type: "line",

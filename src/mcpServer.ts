@@ -67,12 +67,12 @@ const SERVER_INSTRUCTIONS = [
   "    ready-to-paste format.",
   "    If you skip STEP 2: the user sees nothing actionable, has no",
   "    credentials to enter, and STEP 3 will just time out forever.",
-  "    No exceptions. No \"I'll wait for status first.\" Show the",
+  '    No exceptions. No "I\'ll wait for status first." Show the',
   "    message, THEN call STEP 3.",
   "",
   "  STEP 3 — Call `wait_for_pairing` in the defined order.",
   "    Do not end your turn between STEP 2 and STEP 3. Do not say",
-  "    \"I'll poll later\" and stop — actually call the tool now.",
+  '    "I\'ll poll later" and stop — actually call the tool now.',
   "    It blocks up to 50 s. On {paired:false, reason:'timeout'},",
   "    call wait_for_pairing again (up to ~10 retries / ~8 min).",
   "    On {paired:true}, retry whatever functional tool you were",
@@ -86,7 +86,7 @@ const SERVER_INSTRUCTIONS = [
   "  ✗ Ending your turn after get_pairing_credentials. The user is left",
   "    hanging with credentials they may not even see because you",
   "    haven't displayed them.",
-  "  ✗ Telling the user \"QuestDB has no chart tool\" or similar — the",
+  '  ✗ Telling the user "QuestDB has no chart tool" or similar — the',
   "    chart tools are in the catalog; they just need pairing first.",
   "  ✗ Skipping the `userMessage` and improvising your own that omits",
   "    either the deep link OR the ws_url+token. Always show BOTH so",
@@ -136,7 +136,7 @@ const SERVER_INSTRUCTIONS = [
   "Verifying current state before answering:",
   "  The user can change notebook state at any time (switching tabs,",
   "  editing cells, dragging layout). Before answering questions about",
-  "  \"current cell\", \"this notebook\", \"the active chart\", or anything",
+  '  "current cell", "this notebook", "the active chart", or anything',
   "  that depends on what the user is looking at right now, ALWAYS",
   "  call `get_workspace_state` first. Do not rely on prior tool",
   "  results — the user may have changed things since. Tool results",
@@ -190,7 +190,21 @@ export const dispatchToolCall = async (
         log?.("DEBUG", `  content: ${summary}`)
       }
     } else {
-      log?.("DEBUG", `  content: ${JSON.stringify(result.content)}`)
+      // Pictures are logged by size, not as base64.
+      log?.(
+        "DEBUG",
+        `  content: ${JSON.stringify(
+          result.content.map((c) =>
+            c.type === "image"
+              ? {
+                  type: "image",
+                  mimeType: c.mimeType,
+                  base64Chars: c.data.length,
+                }
+              : c,
+          ),
+        )}`,
+      )
     }
     return { content: result.content, isError }
   } catch (err) {
@@ -281,14 +295,22 @@ export const startMcpServer = async ({
     prompts: [],
   }))
 
-  const STATIC_TOOL_LIST = [CONNECT_TOOL, WAIT_TOOL, ...BUNDLED_FUNCTIONAL_TOOLS]
+  const STATIC_TOOL_LIST = [
+    CONNECT_TOOL,
+    WAIT_TOOL,
+    ...BUNDLED_FUNCTIONAL_TOOLS,
+  ]
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: STATIC_TOOL_LIST,
   }))
 
   server.setRequestHandler(CallToolRequestSchema, (req, extra) =>
     dispatchToolCall(
-      { session, pairing: { handleConnectWebConsole, handleWaitForPairing }, log },
+      {
+        session,
+        pairing: { handleConnectWebConsole, handleWaitForPairing },
+        log,
+      },
       req.params.name,
       req.params.arguments ?? {},
       extra.signal,
