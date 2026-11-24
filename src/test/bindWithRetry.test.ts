@@ -79,6 +79,36 @@ describe("bindWithRetry", () => {
     expect(findFreePort).not.toHaveBeenCalled()
   })
 
+  it("names the setting that pinned a taken port", async () => {
+    // Given a pinned port that is taken
+    const attemptListen: AttemptListenFn = (p) =>
+      Promise.reject(eaddrinuseError(p))
+    const findFreePort = vi.fn(() => Promise.resolve(6000))
+
+    // When it was pinned with the default (MCP_BRIDGE_PORT) and with --port
+    const byEnv = bindWithRetry({
+      port: 5000,
+      isPinned: true,
+      attemptListen,
+      findFreePort,
+    })
+    const byOption = bindWithRetry({
+      port: 5000,
+      isPinned: true,
+      pinnedBy: { name: "--port", unpin: "leave out --port" },
+      attemptListen,
+      findFreePort,
+    })
+
+    // Then each error says how to free it
+    await expect(byEnv).rejects.toThrow(
+      "could not bind MCP_BRIDGE_PORT=5000 (EADDRINUSE). Pick a different port or unset MCP_BRIDGE_PORT to auto-allocate.",
+    )
+    await expect(byOption).rejects.toThrow(
+      "could not bind --port=5000 (EADDRINUSE). Pick a different port or leave out --port to auto-allocate.",
+    )
+  })
+
   it("throws port-exhausted when both attempts hit EADDRINUSE", async () => {
     const listenCalls: number[] = []
     const attemptListen: AttemptListenFn = (p) => {

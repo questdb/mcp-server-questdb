@@ -15,7 +15,7 @@ export const CONNECT_TOOL: ToolSchema = {
   name: "get_pairing_credentials",
   description:
     "Get the credentials the user needs to pair their browser with this " +
-    "MCP bridge — calling this tool does NOT itself pair anything. It " +
+    "MCP server — calling this tool does NOT itself pair anything. It " +
     "returns a deep_link, ws_url, token, AND a pre-rendered `userMessage` " +
     "with the exact text to show the user. " +
     "REQUIRED FLOW — do all three in the defined: " +
@@ -63,15 +63,15 @@ export const WAIT_TOOL: ToolSchema = {
     "on success, or `{paired:false, reason:'timeout', retryCount, " +
     "maxRetriesHint:10}` on timeout — call again to keep waiting (up " +
     "to ~10 retries / ~8 min) until the user pairs. " +
-    "If the bridge version doesn't match what the web console expects, " +
+    "If this MCP server's version doesn't match what the web console expects, " +
     "the success payload includes a `warning`, a pre-rendered `userMessage`, " +
     "and `assistantNextActions`; you MUST show the `userMessage` to the user " +
     "verbatim AND suggest the exact upgrade instruction it " +
     "contains (offer to run it for them) before proceeding. " +
-    "If pairing is refused outright for an incompatible bridge, the result " +
+    "If pairing is refused outright for an incompatible MCP server, the result " +
     "is `{paired:false, reason:'incompatible_bridge', userMessage, " +
     "assistantNextActions}` — show the `userMessage` verbatim and STOP " +
-    "polling; pairing cannot succeed until the user reinstalls the bridge " +
+    "polling; pairing cannot succeed until the user reinstalls the MCP server " +
     "version named in the message. " +
     "`permissions` describes the user-granted MCP scopes: " +
     "`grantSchemaAccess=true` allows schema introspection (tables/columns); " +
@@ -209,7 +209,7 @@ const buildVersionUserMessage = (
     `Web Console expects ${pkg} v${m.expectedBridgeVersion} but ` +
     `you're running v${m.bridgeVersion}. ` +
     `${instruction.charAt(0).toUpperCase()}${instruction.slice(1)}, then restart ` +
-    `this coding agent (the running bridge keeps the old version until restart).`
+    `this coding agent (the running MCP server keeps the old version until restart).`
   )
 }
 
@@ -218,11 +218,11 @@ const buildVersionWarning = (
   channel: DistributionChannel,
   paired = true,
 ): string =>
-  `version_mismatch (bridge v${m.bridgeVersion} vs console-expected ` +
+  `version_mismatch (MCP server v${m.bridgeVersion} vs console-expected ` +
   `v${m.expectedBridgeVersion}): show the \`userMessage\` to the user verbatim ` +
   `and offer to run the ${channel === "standalone" ? "standalone download-and-upgrade steps" : "version-switch command"} for them. ` +
   (paired
-    ? `Newer features need the matching bridge; existing tools keep working meanwhile.`
+    ? `Newer features need the matching MCP server; existing tools keep working meanwhile.`
     : `Pairing was refused; no console tools are available until the versions match.`)
 
 // Ordered imperatives so weaker models can't skim past the prose `warning`:
@@ -231,9 +231,9 @@ const buildVersionMismatchActions = (
   m: VersionMismatch,
   channel: DistributionChannel,
 ): string[] => [
-  "You MUST show the `userMessage` text to the user verbatim — they need to know the bridge is out of date.",
-  `You MUST suggest the version switch: ${upgradeInstruction(m.expectedBridgeVersion, channel)} — offer to carry it out for them; it re-pins your coding-agent config to the matching bridge version.`,
-  "After it succeeds, tell the user to restart this coding agent so the upgraded bridge launches (the running process stays on the old version until restart).",
+  "You MUST show the `userMessage` text to the user verbatim — they need to know the MCP server is out of date.",
+  `You MUST suggest the version switch: ${upgradeInstruction(m.expectedBridgeVersion, channel)} — offer to carry it out for them; it re-pins your coding-agent config to the matching MCP server version.`,
+  "After it succeeds, tell the user to restart this coding agent so the upgraded MCP server launches (the running process stays on the old version until restart).",
 ]
 
 const attachVersionMismatch = (
@@ -265,9 +265,9 @@ const buildIncompatiblePayload = (
         upgradeCommand: buildUpgradeCommand(inc.expectedBridgeVersion, channel),
         assistantNextActions: [
           "Show the `userMessage` text to the user verbatim.",
-          `Suggest the version switch: ${upgradeInstruction(inc.expectedBridgeVersion, channel)} — offer to carry it out for them; it re-pins your coding-agent config to the matching bridge version.`,
-          "After it succeeds, have them restart this coding agent so the new bridge launches.",
-          "Stop calling wait_for_pairing — pairing cannot succeed until the bridge version is updated.",
+          `Suggest the version switch: ${upgradeInstruction(inc.expectedBridgeVersion, channel)} — offer to carry it out for them; it re-pins your coding-agent config to the matching MCP server version.`,
+          "After it succeeds, have them restart this coding agent so the new MCP server launches.",
+          "Stop calling wait_for_pairing — pairing cannot succeed until the MCP server version is updated.",
         ],
       }),
     },
@@ -284,7 +284,7 @@ const buildBindFailurePayload = (err: unknown): ToolResultPayload => ({
         reason: "bridge_bind_failed",
         error: err instanceof Error ? err.message : String(err),
         userMessage:
-          "The QuestDB MCP bridge could not open its local connection — its " +
+          "The QuestDB MCP server could not open its local connection — its " +
           "WebSocket port could not be bound. If you set MCP_BRIDGE_PORT, make " +
           "sure that port is free (or unset it to auto-allocate a port), then " +
           "try pairing again.",

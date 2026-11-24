@@ -1,3 +1,9 @@
+import type {
+  AgentInboundMessage,
+  AgentInfo,
+  AgentOutboundMessage,
+} from "./agentProtocol.js"
+
 export type LogLevel = "ERROR" | "WARN" | "INFO" | "DEBUG"
 
 export type Log = (level: LogLevel, ...args: unknown[]) => void
@@ -41,6 +47,7 @@ export type HelloAckMessage = {
   sessionId: string
   heartbeatIntervalMs: number
   seenToolCount: number
+  agent?: AgentInfo
 }
 
 export type ToolCallMessage = {
@@ -50,6 +57,8 @@ export type ToolCallMessage = {
   name: string
   arguments: Record<string, unknown>
   deadlineMs: number | null
+  // Present when a local agent conversation made the call (agent mode).
+  conversationId?: string
 }
 
 export type ToolResultMessage = {
@@ -95,3 +104,5 @@ export type AnyMessage =
   | PingMessage
   | PongMessage
   | CancelMessage
+  | AgentInboundMessage
+  | AgentOutboundMessage

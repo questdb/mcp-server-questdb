@@ -3,6 +3,7 @@
 import { checkbox } from "@inquirer/prompts"
 import { BRIDGE_PACKAGE } from "../bridgePackage.js"
 import {
+  commandArg,
   DISTRIBUTION_CHANNEL,
   selfPath,
   setupCommand,
@@ -28,6 +29,12 @@ import {
 } from "./env.js"
 
 const out = (s: string): void => void process.stdout.write(s)
+
+// The pinned launch command, for the hint about `connect`.
+const pinnedLaunch = (): string =>
+  DISTRIBUTION_CHANNEL === "standalone"
+    ? `node ${commandArg(selfPath())}`
+    : `npx ${BRIDGE_PACKAGE}@${MCP_BRIDGE_VERSION}`
 
 const brandTheme = { style: { highlight: (t: string) => brand(t) } }
 
@@ -61,7 +68,7 @@ const runEnvAndConfirm = async (
         message: "MCP_BRIDGE_PORT",
         default: values.port,
         description:
-          "Port for the bridge to bind. Auto-allocates a free port by default",
+          "Port for the MCP server to listen on. Auto-allocates a free port by default",
         validate: validatePort,
         theme: brandTheme,
       })
@@ -127,8 +134,8 @@ export const runSetup = async (): Promise<number> => {
   out(
     gray(
       DISTRIBUTION_CHANNEL === "standalone"
-        ? `  Pinning bridge v${MCP_BRIDGE_VERSION} (${selfPath()}) — must match the version your QuestDB Web Console expects.`
-        : `  Pinning bridge v${MCP_BRIDGE_VERSION} — must match the version your QuestDB Web Console expects.`,
+        ? `  Pinning the MCP server to v${MCP_BRIDGE_VERSION} (${selfPath()}) — must match the version your QuestDB Web Console expects.`
+        : `  Pinning the MCP server to v${MCP_BRIDGE_VERSION} — must match the version your QuestDB Web Console expects.`,
     ) + "\n\n",
   )
 
@@ -216,6 +223,9 @@ export const runSetup = async (): Promise<number> => {
       }
       out(
         "  Done. Restart your coding agent if it was running, then ask it to pair with your QuestDB Web Console. The agent will walk you through pairing.\n\n",
+      )
+      out(
+        `  To chat with your coding agent in the Web Console instead, run ${gray(`${pinnedLaunch()} connect ${values.consoleOrigin}`)}.\n\n`,
       )
       if (DISTRIBUTION_CHANNEL === "standalone") {
         out(

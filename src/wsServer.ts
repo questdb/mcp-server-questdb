@@ -3,6 +3,10 @@ import { WebSocketServer, WebSocket } from "ws"
 import { tokensMatch } from "./sessionStore.js"
 import { WS_CLOSE_CODES, type AnyMessage, type Log } from "./types.js"
 import type { BridgeSession, BrowserConn } from "./bridgeSession.js"
+import {
+  MAX_IMAGE_DATA_CHARS,
+  MAX_PROMPT_IMAGES,
+} from "./agent/inboundMessages.js"
 
 type WsServerConfig = {
   port: number
@@ -81,8 +85,11 @@ const extractLastSessionId = (req: IncomingMessage): string | undefined => {
   return url.searchParams.get("lastSessionId") ?? undefined
 }
 
-const WS_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024
-const WS_OUTBOUND_BUFFER_LIMIT_BYTES = 4 * 1024 * 1024
+// A message can carry images both ways: the ones the user attaches, and the
+// ones an agent shows in its reply. Room for a few of the largest, plus text.
+const MAX_IMAGES_BYTES = MAX_PROMPT_IMAGES * MAX_IMAGE_DATA_CHARS
+const WS_MAX_PAYLOAD_BYTES = MAX_IMAGES_BYTES + 4 * 1024 * 1024
+const WS_OUTBOUND_BUFFER_LIMIT_BYTES = MAX_IMAGES_BYTES + 4 * 1024 * 1024
 
 type SocketLike = {
   readyState: number
@@ -100,7 +107,7 @@ export const createBrowserConn = (
     config.bufferLimitBytes ?? WS_OUTBOUND_BUFFER_LIMIT_BYTES
   return {
     send: (msg: AnyMessage) => {
-      if (ws.readyState !== WebSocket.OPEN) return
+      if (ws.readyState !== WebSocket.OPEN) return false
       if (ws.bufferedAmount > bufferLimitBytes) {
         config.log?.(
           "WARN",
@@ -111,9 +118,10 @@ export const createBrowserConn = (
         } catch (err) {
           void err
         }
-        return
+        return false
       }
       ws.send(JSON.stringify(msg))
+      return true
     },
     close: (code: number, reason: string) => {
       try {
@@ -134,11 +142,17 @@ export const createBrowserConn = (
 
 export const handleServerRuntimeError = (
   err: Error & { code?: string },
-  config: { log?: Log; onFatalError?: (kind: FatalErrorKind, err: Error) => void },
+  config: {
+    log?: Log
+    onFatalError?: (kind: FatalErrorKind, err: Error) => void
+  },
 ): void => {
   const code = err.code
   if (code === "EMFILE" || code === "ENFILE") {
-    config.log?.("ERROR", `httpServer FATAL: ${code} (file descriptor exhaustion).`)
+    config.log?.(
+      "ERROR",
+      `httpServer FATAL: ${code} (file descriptor exhaustion).`,
+    )
     if (config.onFatalError) {
       config.onFatalError("fd-exhaustion", err)
       return
@@ -202,10 +216,7 @@ export const startWsServer = (config: WsServerConfig) => {
       void err
     })
 
-    const accept = config.session.attachBrowser(
-      conn,
-      extractLastSessionId(req),
-    )
+    const accept = config.session.attachBrowser(conn, extractLastSessionId(req))
     if (accept === "superseded") {
       ws.close(WS_CLOSE_CODES.superseded, "another_browser_connected")
       return

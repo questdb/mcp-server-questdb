@@ -35,7 +35,7 @@ export const parseBridgeVersion = (
 export const requireBridgeVersion = (version: unknown): string => {
   if (typeof version === "string" && parseBridgeVersion(version)) return version
   throw new Error(
-    "FATAL: bridge/package version must be canonical major.minor.patch. " +
+    "FATAL: package version must be canonical major.minor.patch. " +
       "This is a packaging bug — fail loudly so we never wire an unsafe version.",
   )
 }

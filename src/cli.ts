@@ -7,6 +7,7 @@ export type CliOutcome =
   | { kind: "start" }
   | { kind: "setup" }
   | { kind: "upgrade" }
+  | { kind: "connect"; args: string[] }
   | { kind: "exit"; code: number; stdout?: string; stderr?: string }
 
 // Pure mapping from argv to an outcome. The caller performs the actual writes
@@ -20,11 +21,15 @@ export const parseCli = (
 ): CliOutcome => {
   const command = argv[0]
 
+  // Coding agents launch the MCP server with no command. `start` is left out
+  // of the help, but configs written by hand from older docs still use it.
   if (command === undefined || command === "start") return { kind: "start" }
 
   if (command === "setup") return { kind: "setup" }
 
   if (command === "upgrade") return { kind: "upgrade" }
+
+  if (command === "connect") return { kind: "connect", args: argv.slice(1) }
 
   if (command === "-v" || command === "--version") {
     return { kind: "exit", code: 0, stdout: `${version}\n` }

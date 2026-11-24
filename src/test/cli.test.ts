@@ -9,6 +9,23 @@ describe("parseCli", () => {
     expect(parseCli(["start"], "1.2.3", HELP)).toEqual({ kind: "start" })
   })
 
+  it("passes everything after `connect` on to it, and knows no `serve`", () => {
+    expect(
+      parseCli(
+        ["connect", "https://a.example", "--agent", "codex"],
+        "1.2.3",
+        HELP,
+      ),
+    ).toEqual({
+      kind: "connect",
+      args: ["https://a.example", "--agent", "codex"],
+    })
+    expect(parseCli(["serve"], "1.2.3", HELP)).toMatchObject({
+      kind: "exit",
+      code: 2,
+    })
+  })
+
   it("prints the version and exits 0 for --version and -v", () => {
     expect(parseCli(["--version"], "1.2.3", HELP)).toEqual({
       kind: "exit",

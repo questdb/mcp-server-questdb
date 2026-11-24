@@ -90,6 +90,7 @@ describe("bundledTools", () => {
       "x_column",
       "queries",
       "right_axis",
+      "reference_lines",
     ])
     const props = tool.inputSchema.properties as Record<string, unknown>
     const queries = props.queries as { items: { required: string[] } }

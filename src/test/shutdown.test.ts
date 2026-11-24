@@ -33,7 +33,7 @@ describe("createShutdownController", () => {
     })
 
     // When shutdown runs
-    await controller.shutdown()
+    await controller.shutdown("test")
 
     // Then both stops run in order and the process exits 0
     expect(order).toEqual(["mcp", "ws"])
@@ -54,7 +54,10 @@ describe("createShutdownController", () => {
     })
 
     // When shutdown is invoked twice
-    await Promise.all([controller.shutdown(), controller.shutdown()])
+    await Promise.all([
+      controller.shutdown("test"),
+      controller.shutdown("test"),
+    ])
 
     // Then the stop and exit happen exactly once
     expect(stopMcp).toHaveBeenCalledTimes(1)
@@ -72,7 +75,7 @@ describe("createShutdownController", () => {
     })
 
     // When shutdown runs
-    await controller.shutdown()
+    await controller.shutdown("test")
 
     // Then it still exits cleanly
     expect(exit).toHaveBeenCalledWith(0)
@@ -97,7 +100,7 @@ describe("createShutdownController", () => {
       exit,
     })
 
-    await controller.shutdown()
+    await controller.shutdown("test")
 
     // settle ran before getStopWs, so the mid-bind socket was observed + closed.
     expect(settleWs).toHaveBeenCalledTimes(1)
@@ -153,11 +156,40 @@ describe("createShutdownController", () => {
     })
 
     // When shutdown runs and the step budget elapses
-    const done = controller.shutdown()
+    const done = controller.shutdown("test")
     await vi.advanceTimersByTimeAsync(60)
     await done
 
     // Then the budget timeout lets shutdown complete and exit
     expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it("logs why it shuts down, what went wrong on the way, and the exit code", async () => {
+    // Given a WebSocket server that hangs and an MCP server that fails to stop
+    vi.useFakeTimers()
+    const log = vi.fn()
+    const controller = createShutdownController({
+      ...defaults,
+      log,
+      stopMcp: () => Promise.reject(new Error("agent did not exit")),
+      getStopWs: () => () => new Promise<void>(() => {}),
+      exit: vi.fn(),
+    })
+
+    // When
+    const done = controller.shutdown("received SIGTERM")
+    await vi.advanceTimersByTimeAsync(defaults.stepBudgetMs)
+    await done
+
+    // Then
+    expect(log.mock.calls).toEqual([
+      ["INFO", "shutting down: received SIGTERM"],
+      ["WARN", "shutdown: stopping the MCP server failed: agent did not exit"],
+      [
+        "WARN",
+        `shutdown: stopping the WebSocket server did not finish within ${defaults.stepBudgetMs}ms`,
+      ],
+      ["INFO", "exiting with code 0"],
+    ])
   })
 })
