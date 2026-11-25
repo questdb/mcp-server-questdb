@@ -95,31 +95,6 @@ const cursorCommands = (): string[] => {
 export const AGENT_PRESETS = {
   claude: { label: "Claude Code", env: {}, source: { kind: "node", args: [] } },
   codex: { label: "Codex", env: {}, source: { kind: "node", args: [] } },
-  cursor: {
-    label: "Cursor",
-    env: {},
-    source: {
-      kind: "system",
-      commands: cursorCommands,
-      args: ["acp"],
-      install:
-        "Install the Cursor CLI (https://cursor.com/cli) and sign in with `cursor-agent login`, then start the MCP server again.",
-      // `acp` is hidden from the CLI's command list, and versions before
-      // March 2026 do not have it; `help acp` prints its usage when they do.
-      check: {
-        args: ["help", "acp"],
-        accepts: /^Usage: \S+ acp\b/m,
-        otherwise:
-          "Your Cursor CLI is too old to work with the QuestDB Web Console. Update it with `cursor-agent update`, then start the MCP server again.",
-      },
-    },
-    authMethodId: "cursor_login",
-  },
-  pi: {
-    label: "Pi",
-    env: { PI_ACP_QUIET_STARTUP: "1" },
-    source: { kind: "node", args: [] },
-  },
   gemini: {
     label: "Gemini CLI",
     env: {},
@@ -130,11 +105,37 @@ export const AGENT_PRESETS = {
     env: {},
     source: { kind: "node", args: ["--acp"] },
   },
+  cursor: {
+    label: "Cursor",
+    env: {},
+    source: {
+      kind: "system",
+      commands: cursorCommands,
+      args: ["acp"],
+      install:
+        "Install the Cursor CLI (https://cursor.com/cli) and sign in with `cursor-agent login`, then run the connect command again.",
+      // `acp` is hidden from the CLI's command list, and versions before
+      // March 2026 do not have it; `help acp` prints its usage when they do.
+      check: {
+        args: ["help", "acp"],
+        accepts: /^Usage: \S+ acp\b/m,
+        otherwise:
+          "Your Cursor CLI is too old to work with the QuestDB Web Console. Update it with `cursor-agent update`, then run the connect command again.",
+      },
+    },
+    authMethodId: "cursor_login",
+  },
   opencode: {
     label: "OpenCode",
     env: {},
     source: { kind: "native", binary: openCodeBinaries, args: ["acp"] },
     processPerConversation: true,
+  },
+
+  pi: {
+    label: "Pi",
+    env: { PI_ACP_QUIET_STARTUP: "1" },
+    source: { kind: "node", args: [] },
   },
 } as const satisfies Record<string, AgentPreset>
 

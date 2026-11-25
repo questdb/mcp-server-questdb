@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
-import { dispatchToolCall, safePairingCredentialsSummary } from "../mcpServer.js"
+import {
+  dispatchToolCall,
+  safePairingCredentialsSummary,
+} from "../mcpServer.js"
 import type { Log, ToolResultPayload } from "../types.js"
 
 const okText = (text: string): ToolResultPayload => ({
@@ -57,7 +60,9 @@ describe("safePairingCredentialsSummary — token/credential redaction", () => {
 describe("dispatchToolCall — request handler", () => {
   it("forwards a functional tool through the session and mirrors its result", async () => {
     // Given a session that returns a successful payload
-    const session = { callBrowserTool: vi.fn(() => Promise.resolve(okText("rows"))) }
+    const session = {
+      callBrowserTool: vi.fn(() => Promise.resolve(okText("rows"))),
+    }
 
     // When a functional tool is dispatched
     const out = await dispatchToolCall(
@@ -72,7 +77,10 @@ describe("dispatchToolCall — request handler", () => {
       { a: 1 },
       undefined,
     )
-    expect(out).toEqual({ content: [{ type: "text", text: "rows" }], isError: false })
+    expect(out).toEqual({
+      content: [{ type: "text", text: "rows" }],
+      isError: false,
+    })
   })
 
   it("mirrors an error payload from the session as isError:true", async () => {
@@ -117,7 +125,9 @@ describe("dispatchToolCall — request handler", () => {
 
   it("routes pairing tools to the pairing handlers, not the session", async () => {
     // Given a session that must never be called for a pairing tool
-    const session = { callBrowserTool: vi.fn(() => Promise.resolve(okText("nope"))) }
+    const session = {
+      callBrowserTool: vi.fn(() => Promise.resolve(okText("nope"))),
+    }
 
     // When get_pairing_credentials and wait_for_pairing are dispatched
     const creds = await dispatchToolCall(
@@ -148,11 +158,11 @@ describe("dispatchToolCall — request handler", () => {
     const wsUrl = "ws://127.0.0.1:57123"
     const deepLink = `http://127.0.0.1:9000/?mcp-pair=1&mcp-token=${token}`
     const userMessage =
-      `To pair with the QuestDB Web Console:\n\n` +
-      `  Option 1 — click this link and follow the instructions: ${deepLink}\n\n` +
-      `  Option 2 — enter these values manually:\n` +
-      `    WebSocket URL: ${wsUrl}\n` +
-      `    Token:         ${token}\n`
+      `To connect to the QuestDB Web Console:\n\n` +
+      `  Option 1 — open this link and accept the connection: ${deepLink}\n\n` +
+      `  Option 2 — enter these manually:\n` +
+      `    Address: ${wsUrl}\n` +
+      `    Key:     ${token}\n`
     const credentials = okText(
       JSON.stringify({
         paired: false,
@@ -174,7 +184,11 @@ describe("dispatchToolCall — request handler", () => {
 
     // When get_pairing_credentials is dispatched (with debug logging)
     await dispatchToolCall(
-      { session: { callBrowserTool: () => Promise.resolve(okText("x")) }, pairing: pairingThatReturns(credentials), log },
+      {
+        session: { callBrowserTool: () => Promise.resolve(okText("x")) },
+        pairing: pairingThatReturns(credentials),
+        log,
+      },
       "get_pairing_credentials",
       {},
     )
@@ -190,7 +204,13 @@ describe("dispatchToolCall — request handler", () => {
     // And a functional tool's content is logged verbatim
     lines.length = 0
     await dispatchToolCall(
-      { session: { callBrowserTool: () => Promise.resolve(okText("VISIBLE_CONTENT")) }, pairing: pairingThatReturns(credentials), log },
+      {
+        session: {
+          callBrowserTool: () => Promise.resolve(okText("VISIBLE_CONTENT")),
+        },
+        pairing: pairingThatReturns(credentials),
+        log,
+      },
       "list_cells",
       {},
     )

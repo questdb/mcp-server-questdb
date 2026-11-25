@@ -46,12 +46,12 @@ const connectOptionsOf = (
 }
 
 describe("parseConnectOptions", () => {
-  it("runs the pinned Claude Code adapter in the MCP server's own workspace for the local console by default", () => {
+  it("leaves the agent to ask for, in the MCP server's own workspace, for the local console by default", () => {
     // When
     const options = connectOptionsOf([], {}, "/home/me/project")
 
     // Then
-    expect(options.agent).toEqual({ kind: "preset", id: "claude" })
+    expect(options.agent).toBeNull()
     expect(options.workspace).toMatch(
       /[/\\]\.questdb[/\\]mcp-server[/\\]workspace$/,
     )
@@ -149,6 +149,17 @@ describe("parseConnectOptions", () => {
     expect(cwd.kind === "error" && cwd.error).toContain("--cwd")
   })
 
+  it("names --port, not MCP_BRIDGE_PORT, when --port is not a port", () => {
+    // When
+    const parsed = parseConnectOptions(["--port", "abc"], {}, "/")
+
+    // Then
+    expect(parsed).toEqual({
+      kind: "error",
+      error: "--port abc must be an integer",
+    })
+  })
+
   it("rejects an unknown agent with the list of known ones", () => {
     // When
     const parsed = parseConnectOptions(["--agent", "kiro"], {}, "/")
@@ -157,7 +168,7 @@ describe("parseConnectOptions", () => {
     expect(parsed).toEqual({
       kind: "error",
       error:
-        "unknown agent 'kiro'. Use one of: claude, codex, cursor, pi, gemini, copilot, opencode",
+        "unknown agent 'kiro'. Use one of: claude, codex, gemini, copilot, cursor, opencode, pi",
     })
   })
 
@@ -192,9 +203,9 @@ describe("connectUsage", () => {
       "npx @questdb/mcp-server-questdb connect [console-url] [options]",
       "Default console-url: $CONSOLE_ORIGIN, or http://127.0.0.1:9000",
       "--agent <name>",
-      "claude, codex, cursor, pi, gemini,",
-      "copilot, opencode.",
-      "Default: claude",
+      "claude, codex, gemini, copilot,",
+      "cursor, opencode, pi.",
+      "Asks when left out.",
       "--workspace <dir>",
       "--agent-command",
       "--agent-name <name>",
@@ -612,7 +623,9 @@ describe("agent errors", () => {
     )
 
     // Then
-    expect(gemini).toMatch(/GEMINI_API_KEY/)
+    expect(gemini).toBe(
+      "Sign in to Gemini CLI: run `npx @google/gemini-cli` in your terminal and sign in with Google. Then send your message again.",
+    )
     expect(copilot).toMatch(/cannot use Copilot CLI/)
   })
 
@@ -709,7 +722,7 @@ describe("the Cursor preset", () => {
 
       // Then
       await expect(resolving).rejects.toThrow(
-        "Your Cursor CLI is too old to work with the QuestDB Web Console. Update it with `cursor-agent update`, then start the MCP server again.",
+        "Your Cursor CLI is too old to work with the QuestDB Web Console. Update it with `cursor-agent update`, then run the connect command again.",
       )
     },
   )

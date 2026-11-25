@@ -30,16 +30,16 @@ const LAUNCH =
     ? `node ${commandArg(selfPath())}`
     : `npx ${BRIDGE_PACKAGE}`
 
-const USAGE = `QuestDB MCP Server: use QuestDB from your coding agent, or chat with
-your coding agent in the QuestDB Web Console.
-
-Use QuestDB from your coding agent (MCP):
-  ${LAUNCH} setup
-      Configure QuestDB MCP Server for your coding agents
-  ${LAUNCH} upgrade
-      Update QuestDB MCP Server version
+const USAGE = `Connect your coding agent to the QuestDB Web Console.
 
 ${connectUsage(LAUNCH)}
+Or let your coding agent work from your terminal:
+  ${LAUNCH} setup
+      Set up your coding agents, then ask them to connect to the
+      QuestDB Web Console
+  ${LAUNCH} upgrade
+      Update the version your coding agents use
+
 Other:
   ${LAUNCH} --version, -v
       Print the version and exit
@@ -97,10 +97,35 @@ if (cli.kind === "connect") {
     writeFd(process.stderr.fd, `${parsed.error}\n\n${connectUsage(LAUNCH)}`)
     process.exit(2)
   }
+  const options = parsed.options
+  const chooser = await import("./agent/chooseAgent.js")
+  if (options.agent === null) {
+    // Asking needs a terminal; a script names the agent instead.
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      writeFd(process.stderr.fd, `${chooser.NO_TTY_AGENT_ERROR}\n`)
+      process.exit(2)
+    }
+    try {
+      options.agent = { kind: "preset", id: await chooser.askForAgent() }
+    } catch {
+      // Ctrl+C at the question.
+      process.exit(130)
+    }
+  }
   const { runConnect } = await import("./agent/connect.js")
-  await runConnect(parsed.options, logger).catch((err: unknown) => {
-    fatal(`connect failed: ${err instanceof Error ? err.message : String(err)}`)
-  })
+  const agent = options.agent
+  // Remember a choice that works: an agent that cannot be found or
+  // installed is not preselected next time.
+  const remember = async () => {
+    if (agent.kind === "preset") await chooser.writeLastAgent(agent.id)
+  }
+  await runConnect({ ...options, agent }, logger, remember).catch(
+    (err: unknown) => {
+      fatal(
+        `connect failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    },
+  )
 }
 
 const main = async () => {

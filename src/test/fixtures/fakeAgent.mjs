@@ -25,6 +25,11 @@
 // Environment switches for agent behaviors the bridge adapts to:
 //   FAKE_AGENT_AUTH_METHOD     — offers this auth method and refuses sessions
 //                                until the client authenticates with it
+//   FAKE_AGENT_SIGN_IN_FILE    — signed in only when this file exists when the
+//                                process starts, like a CLI that reads its
+//                                credentials once. FAKE_AGENT_SIGN_IN_CHECK
+//                                says when it refuses: "session" (Gemini CLI)
+//                                or "prompt" (Claude Code).
 //   FAKE_AGENT_AUTH_REJECTS    — refuses to authenticate, like an agent whose
 //                                CLI is not signed in
 //   FAKE_AGENT_SESSION_MODELS  — reports models in the session's `models`
@@ -33,7 +38,7 @@
 //                                servers registered last, like OpenCode
 //   FAKE_AGENT_START_DELAY_MS  — waits this long before it reads `initialize`
 //   FAKE_AGENT_PID_FILE        — appends its process id to this file
-import { appendFileSync } from "node:fs"
+import { appendFileSync, existsSync } from "node:fs"
 import { Readable, Writable } from "node:stream"
 import * as acp from "@agentclientprotocol/sdk"
 
@@ -74,6 +79,9 @@ const SESSION_MODELS = process.env.FAKE_AGENT_SESSION_MODELS === "1"
 const SHARED_MCP = process.env.FAKE_AGENT_SHARED_MCP === "1"
 
 let authenticated = !AUTH_METHOD
+const SIGN_IN_FILE = process.env.FAKE_AGENT_SIGN_IN_FILE
+const signedInAtStart = !SIGN_IN_FILE || existsSync(SIGN_IN_FILE)
+const SIGN_IN_CHECK = process.env.FAKE_AGENT_SIGN_IN_CHECK ?? "session"
 let canAskQuestions = false
 let canOpenLinks = false
 let canShowNotices = false
@@ -93,6 +101,9 @@ const sessionSettings = () =>
 
 const registerMcpServers = (sessionId, servers) => {
   if (!authenticated) throw acp.RequestError.authRequired()
+  if (!signedInAtStart && SIGN_IN_CHECK === "session") {
+    throw acp.RequestError.authRequired()
+  }
   sessions.set(sessionId, servers)
   latestMcpServers = servers
 }
@@ -229,6 +240,9 @@ const app = acp
   })
   .onRequest("session/prompt", async ({ params, client }) => {
     const { sessionId } = params
+    if (!signedInAtStart && SIGN_IN_CHECK === "prompt") {
+      throw acp.RequestError.authRequired()
+    }
     // The user's message is the last block; the bridge may put its
     // instructions before it.
     const images = params.prompt.filter((block) => block.type === "image")

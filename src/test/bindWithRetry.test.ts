@@ -3,10 +3,12 @@ import { bindWithRetry, type AttemptListenFn } from "../bindWithRetry.js"
 
 const noopStop = (): Promise<void> => Promise.resolve()
 
-const stubListen = (calls: number[]): AttemptListenFn => (p) => {
-  calls.push(p)
-  return Promise.resolve({ stop: noopStop })
-}
+const stubListen =
+  (calls: number[]): AttemptListenFn =>
+  (p) => {
+    calls.push(p)
+    return Promise.resolve({ stop: noopStop })
+  }
 
 const eaddrinuseError = (port: number): Error => {
   const err = new Error(
@@ -102,10 +104,10 @@ describe("bindWithRetry", () => {
 
     // Then each error says how to free it
     await expect(byEnv).rejects.toThrow(
-      "could not bind MCP_BRIDGE_PORT=5000 (EADDRINUSE). Pick a different port or unset MCP_BRIDGE_PORT to auto-allocate.",
+      "Port 5000 (set by MCP_BRIDGE_PORT) is in use. Pick a different port, or unset MCP_BRIDGE_PORT to use a free one.",
     )
     await expect(byOption).rejects.toThrow(
-      "could not bind --port=5000 (EADDRINUSE). Pick a different port or leave out --port to auto-allocate.",
+      "Port 5000 (set by --port) is in use. Pick a different port, or leave out --port to use a free one.",
     )
   })
 

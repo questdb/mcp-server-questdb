@@ -12,11 +12,11 @@ import {
 import { defaultAgentWorkspace } from "./bridgeHome.js"
 
 export const DEFAULT_CONSOLE_ORIGIN = "http://127.0.0.1:9000"
-const DEFAULT_AGENT = "claude"
 const DEFAULT_AGENT_NAME = "Custom agent"
 
 export type ConnectOptions = {
-  agent: AgentChoice
+  // null: --agent was left out, so `connect` asks which agent to run.
+  agent: AgentChoice | null
   workspace: string
   consoleOrigin: string
   // The console's address: its origin, and the path it is served under.
@@ -25,6 +25,9 @@ export type ConnectOptions = {
   pinnedPort: { port: number; by: PortPin } | null
   openBrowser: boolean
 }
+
+// After `connect` asked for a left-out --agent.
+export type ResolvedConnectOptions = ConnectOptions & { agent: AgentChoice }
 
 export type ConnectOptionsResult =
   | { kind: "options"; options: ConnectOptions }
@@ -68,14 +71,13 @@ const describe = (text: string): string => {
 
 // The `connect` part of the help, for the main help and `connect --help`.
 export const connectUsage = (launch: string): string =>
-  `Chat with your coding agent in the QuestDB Web Console:
+  `Let your coding agent work in the Web Console's AI Assistant:
   ${launch} connect [console-url] [options]
-      Run your coding agent for the Web Console at console-url.
+      Run your coding agent on this computer for the console at console-url.
       Default console-url: $CONSOLE_ORIGIN, or ${DEFAULT_CONSOLE_ORIGIN}
 
   Options:
-    --agent <name>           ${describe(`Agent to run: ${PRESET_IDS.join(", ")}.`)}
-                             Default: ${DEFAULT_AGENT}
+    --agent <name>           ${describe(`Agent to run: ${PRESET_IDS.join(", ")}. Asks when left out.`)}
     --workspace <dir>        Folder the agent works in.
                              Default: ${tildePath(defaultAgentWorkspace())}
     -h, --help               Print this help and exit
@@ -88,7 +90,7 @@ export const connectUsage = (launch: string): string =>
     --no-open                Print the console link without opening it
 
 The agent's own tools, like file edits and commands, run without asking.
-Questions the agent asks you appear in the Web Console's chat.
+Questions the agent asks you appear in the Web Console's AI Assistant.
 `
 
 // The Web Console's address from the URL the user gave, without its query,
@@ -114,16 +116,17 @@ const consoleUrlOf = (
 }
 
 const resolveAgentChoice = (
-  agent: string,
+  agent: string | undefined,
   agentCommand: string | undefined,
   agentName: string,
-): AgentChoice | string => {
+): AgentChoice | null | string => {
   if (agentCommand) {
     return {
       kind: "custom",
       launch: customAgentLaunch(agentCommand, agentName),
     }
   }
+  if (agent === undefined) return null
   if (isAgentPresetId(agent)) return { kind: "preset", id: agent }
   return `unknown agent '${agent}'. Use one of: ${PRESET_IDS.join(", ")}`
 }
@@ -138,7 +141,7 @@ export const parseConnectOptions = (
     parsed = parseArgs({
       args,
       options: {
-        agent: { type: "string", default: DEFAULT_AGENT },
+        agent: { type: "string" },
         "agent-command": { type: "string" },
         "agent-name": { type: "string", default: DEFAULT_AGENT_NAME },
         workspace: { type: "string" },
@@ -179,7 +182,10 @@ export const parseConnectOptions = (
   )
   if (typeof agent === "string") return { kind: "error", error: agent }
 
-  const port = parsePort(values.port ?? env.MCP_BRIDGE_PORT)
+  const port =
+    values.port !== undefined
+      ? parsePort(values.port, "--port")
+      : parsePort(env.MCP_BRIDGE_PORT)
   if ("error" in port) return { kind: "error", error: port.error }
 
   return {

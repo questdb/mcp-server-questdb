@@ -68,7 +68,7 @@ const runEnvAndConfirm = async (
         message: "MCP_BRIDGE_PORT",
         default: values.port,
         description:
-          "Port for the MCP server to listen on. Auto-allocates a free port by default",
+          "Port the Web Console connects to. A free port is picked by default",
         validate: validatePort,
         theme: brandTheme,
       })
@@ -114,6 +114,11 @@ const printReview = (
   out("\n")
 }
 
+// `connect` asks which agent to run; name it when the user set up exactly
+// one, so there is nothing to ask.
+export const agentFlagOf = (selectedIds: AgentId[]): string =>
+  selectedIds.length === 1 ? ` --agent ${selectedIds[0]}` : ""
+
 export const runSetup = async (): Promise<number> => {
   if (!process.stdin.isTTY) {
     process.stderr.write(
@@ -128,14 +133,14 @@ export const runSetup = async (): Promise<number> => {
   const agents = buildAgents()
   out("\n" + renderBanner() + "\n\n")
   out(
-    `  Configure ${BRIDGE_PACKAGE} as an MCP server for your coding agents ` +
-      "to interact with QuestDB\n",
+    "  Let your coding agents work with the QuestDB Web Console. " +
+      `This adds ${BRIDGE_PACKAGE} to their MCP config.\n`,
   )
   out(
     gray(
       DISTRIBUTION_CHANNEL === "standalone"
-        ? `  Pinning the MCP server to v${MCP_BRIDGE_VERSION} (${selfPath()}) — must match the version your QuestDB Web Console expects.`
-        : `  Pinning the MCP server to v${MCP_BRIDGE_VERSION} — must match the version your QuestDB Web Console expects.`,
+        ? `  Pinning to v${MCP_BRIDGE_VERSION} (${selfPath()}), the version your QuestDB Web Console expects.`
+        : `  Pinning to v${MCP_BRIDGE_VERSION}, the version your QuestDB Web Console expects.`,
     ) + "\n\n",
   )
 
@@ -222,10 +227,10 @@ export const runSetup = async (): Promise<number> => {
         }
       }
       out(
-        "  Done. Restart your coding agent if it was running, then ask it to pair with your QuestDB Web Console. The agent will walk you through pairing.\n\n",
+        "  Done. Restart your coding agent if it was running, then ask it to connect to the QuestDB Web Console. It will show you a link to open.\n\n",
       )
       out(
-        `  To chat with your coding agent in the Web Console instead, run ${gray(`${pinnedLaunch()} connect ${values.consoleOrigin}`)}.\n\n`,
+        `  To let your coding agent work in the Web Console's AI Assistant instead, run ${gray(`${pinnedLaunch()} connect ${values.consoleOrigin}${agentFlagOf(selectedIds)}`)}.\n\n`,
       )
       if (DISTRIBUTION_CHANNEL === "standalone") {
         out(

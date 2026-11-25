@@ -150,7 +150,7 @@ describe("get_pairing_credentials handler", () => {
       expect(parsed.browserOpened).toMatch(/userMessage/)
       // No misleading "a tab just opened" lead-in on the failure path.
       expect(parsed.userMessage as string).toMatch(
-        /^To pair with the QuestDB Web Console/,
+        /^To connect to the QuestDB Web Console/,
       )
     }
   })
@@ -174,7 +174,7 @@ describe("get_pairing_credentials handler", () => {
     expect(parsed.browserOpened).toMatch(/auto_open_browser/)
     // Manual-pairing lead-in, and the credentials still returned in full.
     expect(parsed.userMessage as string).toMatch(
-      /^To pair with the QuestDB Web Console/,
+      /^To connect to the QuestDB Web Console/,
     )
     expect(parsed.userMessage as string).toContain("mcp-pair=1")
     expect(parsed.userMessage as string).toContain("ws://127.0.0.1:57123")
@@ -429,7 +429,7 @@ describe("get_pairing_credentials handler", () => {
         ensureListening: () =>
           Promise.reject(
             new Error(
-              "could not bind MCP_BRIDGE_PORT=9999 (EADDRINUSE). Pick a different port or unset MCP_BRIDGE_PORT to auto-allocate.",
+              "Port 9999 (set by MCP_BRIDGE_PORT) is in use. Pick a different port, or unset MCP_BRIDGE_PORT to use a free one.",
             ),
           ),
         buildDeepLink: () => {
@@ -443,7 +443,9 @@ describe("get_pairing_credentials handler", () => {
     const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
     expect(parsed.paired).toBe(false)
     expect(parsed.reason).toBe("bridge_bind_failed")
-    expect(parsed.error as string).toContain("MCP_BRIDGE_PORT=9999")
+    expect(parsed.error as string).toContain(
+      "Port 9999 (set by MCP_BRIDGE_PORT)",
+    )
     expect(typeof parsed.userMessage).toBe("string")
     expect(Array.isArray(parsed.assistantNextActions)).toBe(true)
     // Bind failed → we must not hand out a dead deep link.

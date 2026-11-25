@@ -96,4 +96,16 @@ describe("parsePort", () => {
     expect("error" in parsePort("0")).toBe(true)
     expect("error" in parsePort("70000")).toBe(true)
   })
+
+  it("names the setting the value came from", () => {
+    expect(parsePort("abc")).toEqual({
+      error: "MCP_BRIDGE_PORT=abc must be an integer",
+    })
+    expect(parsePort("abc", "--port")).toEqual({
+      error: "--port abc must be an integer",
+    })
+    expect(parsePort("70000", "--port")).toEqual({
+      error: "--port 70000 is out of range",
+    })
+  })
 })

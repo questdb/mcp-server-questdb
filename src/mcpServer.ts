@@ -64,7 +64,7 @@ const SERVER_INSTRUCTIONS = [
   "  STEP 2 — Write a message to the user (MANDATORY — DO NOT SKIP).",
   "    Copy the `userMessage` field from STEP 1's response verbatim",
   "    into your message to the user. It already contains BOTH the",
-  "    one-click deep link AND the manual ws_url + token in a",
+  "    one-click link AND the manual address + key in a",
   "    ready-to-paste format.",
   "    If you skip STEP 2: the user sees nothing actionable, has no",
   "    credentials to enter, and STEP 3 will just time out forever.",
@@ -90,8 +90,15 @@ const SERVER_INSTRUCTIONS = [
   '  ✗ Telling the user "QuestDB has no chart tool" or similar — the',
   "    chart tools are in the catalog; they just need pairing first.",
   "  ✗ Skipping the `userMessage` and improvising your own that omits",
-  "    either the deep link OR the ws_url+token. Always show BOTH so",
+  "    either the link OR the address + key. Always show BOTH so",
   "    the user can pick whichever works for them.",
+  "",
+  "How to talk about it: the user knows this as connecting their",
+  'coding agent (you) to the QuestDB Web Console. Say "connect",',
+  'not "pair", and never mention MCP, the MCP server, WebSocket or',
+  'tokens to them. The console shows "Connect agent" at the bottom',
+  'of the screen, and your name (or "Agent") there once you are',
+  "connected.",
   "",
   "═══════════════════════════════════════════════════════════════════",
   "",
@@ -124,7 +131,8 @@ const SERVER_INSTRUCTIONS = [
   "",
   "Operations outside the granted scope return PERMISSION_DENIED naming",
   "the missing scope — adjust your plan and tell the user how to grant",
-  "it (QuestDB console footer → MCP popover). Do NOT retry blindly.",
+  "it (QuestDB Web Console: click the agent status at the bottom of the",
+  "screen, then Permissions). Do NOT retry blindly.",
   "",
   "═══════════════════════════════════════════════════════════════════",
   "",
@@ -239,6 +247,11 @@ export const startMcpServer = async ({
       instructions: SERVER_INSTRUCTIONS,
     },
   )
+
+  // The console shows the coding agent's name, e.g. "Claude Code connected".
+  server.oninitialized = () => {
+    session.setMcpClient(server.getClientVersion()?.name)
+  }
 
   const pairingCtx: PairingToolsContext = {
     beginPairingAttempt: () => session.beginPairingAttempt(),

@@ -1,3 +1,21 @@
+// Glossary. Code names follow the protocols; the user only ever sees "your
+// coding agent" or the agent's name (Claude Code, Codex, ...).
+//
+// - bridge: this process. It speaks MCP to a coding agent and WebSocket to one
+//   Web Console tab. Users know the package as the "MCP server"; the console
+//   never names it.
+// - pair / pairing: the WebSocket handshake with a console tab (deep link or
+//   address + key, then consent). The user sees it as "connect".
+// - MCP mode (`index.ts`, started by the agent's MCP config): the user talks to
+//   the agent in their terminal or IDE; the agent calls console tools. The
+//   agent's MCP clientInfo name reaches the console as `mcpClient`.
+// - Chat mode (`connect`, `src/agent/`): this process runs an ACP agent and the
+//   user chats with it in the console's AI Assistant. The console learns it
+//   through `agent` (deep link `mcp-agent`, hello_ack `agent`). `agent` and
+//   `mcpClient` are never sent together: the console reads the mode from them.
+// - "agent" in `src/setup/` means a coding agent whose MCP config we write; in
+//   `src/agent/` it means the agent process chat mode runs. Same programs,
+//   different roles.
 import { randomBytes } from "node:crypto"
 import { MCP_BRIDGE_VERSION, parseMajor } from "./protocolVersion.js"
 import type {
@@ -139,8 +157,8 @@ export type AgentChannel = {
 
 const DEFAULT_NOT_PAIRED_RECOVERY =
   `Recovery: call \`get_pairing_credentials\` to get a pairing URL ` +
-  `(present BOTH the deep link AND the manual ws_url + token to ` +
-  `the user), then call \`wait_for_pairing\` until ` +
+  `(present its \`userMessage\` to the user: it has BOTH the link AND ` +
+  `the manual address + key), then call \`wait_for_pairing\` until ` +
   `{paired:true}, then retry this tool.`
 
 export type BridgeSessionConfig = {
@@ -188,6 +206,16 @@ const generateSessionId = (): string => {
   return `s-${t}-${r}`
 }
 
+// The name an MCP client sends in `initialize` (clientInfo.name), cleaned for
+// a URL and the console: control characters dropped, at most 64 characters.
+const MAX_MCP_CLIENT_NAME = 64
+export const mcpClientNameOf = (raw: unknown): string | null => {
+  if (typeof raw !== "string") return null
+  // eslint-disable-next-line no-control-regex
+  const name = raw.replace(/[\u0000-\u001f\u007f]/g, "").trim()
+  return name ? name.slice(0, MAX_MCP_CLIENT_NAME) : null
+}
+
 export class BridgeSession {
   private state: SessionState = "S0"
   private browser: BrowserConn | null = null
@@ -212,11 +240,24 @@ export class BridgeSession {
   private detachedSessionId: string | null = null
   private connectingLastSessionId: string | undefined = undefined
   private agentChannel: AgentChannel | null = null
+  // MCP mode only: the coding agent that started this server, so the console
+  // can name it. Chat mode names its agent through `agentChannel` instead.
+  private mcpClientName: string | null = null
 
   constructor(private config: BridgeSessionConfig) {}
 
   attachAgentChannel(channel: AgentChannel): void {
     this.agentChannel = channel
+  }
+
+  setMcpClient(rawName: unknown): void {
+    this.mcpClientName = mcpClientNameOf(rawName)
+  }
+
+  // The MCP client's name, only when no chat agent is attached: the console
+  // reads `agent` as chat mode and `mcpClient` as MCP mode, never both.
+  private mcpClientForConsole(): string | null {
+    return this.agentChannel ? null : this.mcpClientName
   }
 
   sendToBrowser(msg: AgentOutboundMessage): boolean {
@@ -256,6 +297,8 @@ export class BridgeSession {
       params.set("mcp-agent", this.agentChannel.info.label)
       params.set("mcp-agent-cwd", this.agentChannel.info.cwd)
     }
+    const mcpClient = this.mcpClientForConsole()
+    if (mcpClient) params.set("mcp-client", mcpClient)
     return `${this.config.consoleUrl ?? this.config.consoleOrigin}/?${params.toString()}`
   }
 
@@ -688,6 +731,7 @@ export class BridgeSession {
         this.cancelDisconnectGrace(call)
       }
     }
+    const mcpClient = this.mcpClientForConsole()
     const ack: HelloAckMessage = {
       v: MCP_BRIDGE_VERSION,
       type: "hello_ack",
@@ -695,6 +739,7 @@ export class BridgeSession {
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       seenToolCount: this.browserTools.length,
       ...(this.agentChannel ? { agent: this.agentChannel.info } : {}),
+      ...(mcpClient ? { mcpClient: { name: mcpClient } } : {}),
     }
     this.browser?.send(ack)
 

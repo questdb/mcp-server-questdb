@@ -5,6 +5,7 @@ import { join } from "node:path"
 //   agents/<id>-<version>/  pinned adapter installs
 //   workspace/              the agents' default working folder
 //   sessions.json           conversation → agent session map
+//   last-agent              the agent `connect` ran last, preselected next time
 export const bridgeHome = (): string =>
   process.env.QUESTDB_MCP_SERVER_HOME ??
   join(homedir(), ".questdb", "mcp-server")
@@ -16,3 +17,5 @@ export const defaultAgentWorkspace = (): string =>
 
 export const sessionStorePath = (): string =>
   join(bridgeHome(), "sessions.json")
+
+export const lastAgentPath = (): string => join(bridgeHome(), "last-agent")

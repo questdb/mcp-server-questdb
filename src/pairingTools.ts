@@ -206,10 +206,10 @@ const buildVersionUserMessage = (
   const pkg = bridgePackageForVersion(m.expectedBridgeVersion)
   const instruction = upgradeInstruction(m.expectedBridgeVersion, channel)
   return (
-    `Web Console expects ${pkg} v${m.expectedBridgeVersion} but ` +
-    `you're running v${m.bridgeVersion}. ` +
+    `The QuestDB Web Console needs ${pkg} v${m.expectedBridgeVersion}, but ` +
+    `this coding agent runs v${m.bridgeVersion}. ` +
     `${instruction.charAt(0).toUpperCase()}${instruction.slice(1)}, then restart ` +
-    `this coding agent (the running MCP server keeps the old version until restart).`
+    `this coding agent so it uses the new version.`
   )
 }
 
@@ -231,7 +231,7 @@ const buildVersionMismatchActions = (
   m: VersionMismatch,
   channel: DistributionChannel,
 ): string[] => [
-  "You MUST show the `userMessage` text to the user verbatim — they need to know the MCP server is out of date.",
+  "You MUST show the `userMessage` text to the user verbatim — they need to know an update is needed.",
   `You MUST suggest the version switch: ${upgradeInstruction(m.expectedBridgeVersion, channel)} — offer to carry it out for them; it re-pins your coding-agent config to the matching MCP server version.`,
   "After it succeeds, tell the user to restart this coding agent so the upgraded MCP server launches (the running process stays on the old version until restart).",
 ]
@@ -284,10 +284,9 @@ const buildBindFailurePayload = (err: unknown): ToolResultPayload => ({
         reason: "bridge_bind_failed",
         error: err instanceof Error ? err.message : String(err),
         userMessage:
-          "The QuestDB MCP server could not open its local connection — its " +
-          "WebSocket port could not be bound. If you set MCP_BRIDGE_PORT, make " +
-          "sure that port is free (or unset it to auto-allocate a port), then " +
-          "try pairing again.",
+          "Your coding agent could not open a local port for the QuestDB Web " +
+          "Console. If you set MCP_BRIDGE_PORT, make sure that port is free " +
+          "(or unset it to use a free port), then try connecting again.",
         assistantNextActions: [
           "Show the `userMessage` text to the user.",
           "If MCP_BRIDGE_PORT is pinned, suggest freeing that port or unsetting it, then call get_pairing_credentials again to retry.",
@@ -315,7 +314,7 @@ export const createPairingToolHandlers = (
         consoleOrigin: state.consoleOrigin,
         permissions: state.permissions,
         message:
-          "Already paired with the QuestDB Web Console; notebook tools are available.",
+          "Already connected to the QuestDB Web Console; notebook tools are available.",
       }
       if (state.versionMismatch) {
         attachVersionMismatch(payload, state.versionMismatch, channel)
@@ -349,15 +348,16 @@ export const createPairingToolHandlers = (
         : "Automatic browser open was skipped (auto_open_browser:false). Show the user the userMessage so they can open the deep link or pair manually."
     const userMessage =
       (opened
-        ? `A browser tab pointing at the QuestDB Web Console should have just ` +
-          `opened — follow the pairing instructions there.\n\n` +
-          `If no tab opened, pair manually:\n\n`
-        : `To pair with the QuestDB Web Console:\n\n`) +
-      `  Option 1 — click this link and follow the instructions: ${url}\n\n` +
-      `  Option 2 — open the QuestDB Web Console, click the MCP connection status at\n` +
-      `  the bottom of the screen, and enter these values manually:\n` +
-      `    WebSocket URL: ${wsUrl}\n` +
-      `    Token:         ${token}\n`
+        ? `A QuestDB Web Console tab should have just opened — accept the ` +
+          `connection there.\n\n` +
+          `If no tab opened, connect another way:\n\n`
+        : `To connect to the QuestDB Web Console:\n\n`) +
+      `  Option 1 — open this link and accept the connection: ${url}\n\n` +
+      `  Option 2 — in the QuestDB Web Console, click the agent status at the\n` +
+      `  bottom of the screen ("Connect agent"), open "Enter details manually",\n` +
+      `  and enter (if an agent is connected there, disconnect it first):\n` +
+      `    Address: ${wsUrl}\n` +
+      `    Key:     ${token}\n`
     return {
       content: [
         {

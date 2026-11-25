@@ -17,6 +17,7 @@ import WebSocket from "ws"
 import { BUNDLED_TOOL_NAMES } from "../bundledTools.js"
 import { bundleFileName, commandArg } from "../distribution.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
+import { NO_TTY_AGENT_ERROR } from "../agent/chooseAgent.js"
 
 const execFileP = promisify(execFile)
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
@@ -351,6 +352,30 @@ describe.skipIf(process.platform === "win32")("standalone bundle e2e", () => {
     expect(err.stderr).not.toContain("npx")
   })
 
+  it("connect without --agent and without a terminal asks for --agent and starts nothing", async () => {
+    // Given
+    const home = join(dir, "connect-no-tty")
+    mkdirSync(home)
+
+    // When
+    const err = (await execFileP(
+      process.execPath,
+      [bundlePath, "connect", "http://127.0.0.1:9000", "--no-open"],
+      {
+        cwd: home,
+        env: {
+          ...isolatedEnv(home),
+          QUESTDB_MCP_SERVER_HOME: join(home, "mcp-server"),
+        },
+      },
+    ).catch((e: unknown) => e)) as { code: number; stderr: string }
+
+    // Then
+    expect(err.code).toBe(2)
+    expect(err.stderr.trim()).toBe(NO_TTY_AGENT_ERROR)
+    expect(existsSync(join(home, "mcp-server"))).toBe(false)
+  })
+
   it("pairing WebSocket enforces the token and accepts a bearer", async () => {
     const creds = await session.rpc(3, "tools/call", {
       name: "get_pairing_credentials",
@@ -358,12 +383,15 @@ describe.skipIf(process.platform === "win32")("standalone bundle e2e", () => {
     })
     const text = creds.result?.content?.[0]?.text
     expect(text).toBeDefined()
-    const { wsUrl, token } = JSON.parse(text!) as {
+    const { wsUrl, token, deepLink } = JSON.parse(text!) as {
       wsUrl?: string
       token?: string
+      deepLink?: string
     }
     expect(wsUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+$/)
     expect(token).toBeTruthy()
+    // The console names the agent from its MCP clientInfo.
+    expect(new URL(deepLink!).searchParams.get("mcp-client")).toBe("e2e")
 
     const origin = "http://127.0.0.1:9000"
     expect(await wsAttempt(`${wsUrl}/?token=wrong`, origin)).toContain("401")

@@ -2,6 +2,7 @@ import { writeSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { BridgeSession } from "../bridgeSession.js"
 import { bindWithRetry } from "../bindWithRetry.js"
+import { BRIDGE_PACKAGE } from "../bridgePackage.js"
 import type { Logger } from "../logger.js"
 import { openInBrowser } from "../openBrowser.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
@@ -17,7 +18,7 @@ import {
   AGENT_MODE_NOT_PAIRED_RECOVERY,
   startQuestdbMcpHttpServer,
 } from "./questdbMcpHttpServer.js"
-import type { ConnectOptions } from "./connectOptions.js"
+import type { ResolvedConnectOptions } from "./connectOptions.js"
 
 const QUESTDB_MCP_SERVER_NAME = "questdb_console"
 
@@ -26,8 +27,10 @@ const printLines = (lines: string[]): void => {
 }
 
 export const runConnect = async (
-  options: ConnectOptions,
+  options: ResolvedConnectOptions,
   logger: Logger,
+  // Runs once the agent's program is found, before it starts.
+  onAgentResolved: () => Promise<void> = async () => {},
 ): Promise<void> => {
   const { log } = logger
   const allowedOrigins = deriveAllowedOrigins(options.consoleOrigin)
@@ -73,6 +76,7 @@ export const runConnect = async (
     const reason = err instanceof Error ? err.message : String(err)
     throw new Error(logFile ? `${reason}\nDetails: ${logFile}` : reason)
   })
+  await onAgentResolved()
   await mkdir(options.workspace, { recursive: true })
 
   const store = new AgentSessionStore(
@@ -110,14 +114,19 @@ export const runConnect = async (
   const deepLink = session.buildDeepLink()
   printLines([
     "",
-    `QuestDB MCP server v${MCP_BRIDGE_VERSION}, agent mode`,
-    `  Agent:     ${launch.label}`,
+    `Let ${launch.label} work in the QuestDB Web Console's AI Assistant`,
     `  Workspace: ${options.workspace}`,
     `  Console:   ${options.consoleUrl}`,
+    `  Version:   ${BRIDGE_PACKAGE} v${MCP_BRIDGE_VERSION}`,
     `  Log file:  ${logFile ?? "(stderr only)"}`,
     "",
-    "Open this link to pair the Web Console:",
+    options.openBrowser
+      ? "A Web Console tab should open. If it does not, open this link:"
+      : `Open this link to connect ${launch.label} to the Web Console:`,
     `  ${deepLink}`,
+    "",
+    "Accept the connection there; it then works in the AI Assistant.",
+    "Keep this terminal open while it works. Press Ctrl+C to stop.",
     "",
   ])
   if (options.openBrowser) await openInBrowser(deepLink, log)

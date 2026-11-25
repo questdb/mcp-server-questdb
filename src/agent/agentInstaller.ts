@@ -45,7 +45,7 @@ const installRoot = (id: string, install: AgentInstall): string =>
 
 export const NPM_MISSING =
   "npm was not found. It comes with Node.js: install Node.js from " +
-  "https://nodejs.org, then start the MCP server again."
+  "https://nodejs.org, then run the connect command again."
 
 // npm's own reason for a failed install, without its log boilerplate: the
 // lines it marks as errors, less the bare code, syscall and errno lines.

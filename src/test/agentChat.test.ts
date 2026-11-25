@@ -487,7 +487,7 @@ describe("AgentChat", () => {
     expect(end.result).toEqual({
       outcome: "failed",
       error:
-        "Fake Agent needs you to sign in. Sign in with its own command line tool, then start the agent again.",
+        "Fake Agent needs you to sign in. Sign in with its own command line tool, then send your message again.",
     })
   })
 
@@ -666,6 +666,66 @@ describe("AgentChat", () => {
         msg.type === "agent_status" && msg.state === "error",
     )
     expect(failed.error).toMatch(/needs you to sign in/)
+  })
+
+  it("goes on once the user signs in, when the agent refused to open a session", async () => {
+    // Given an agent that reads its credentials once, at start, like Gemini
+    // CLI, and found none
+    const signInFile = join(mkdtempSync(join(tmpdir(), "sign-in-")), "creds")
+    const { chat, outbox } = await startChat({
+      launch: {
+        env: {
+          FAKE_AGENT_SIGN_IN_FILE: signInFile,
+          FAKE_AGENT_SIGN_IN_CHECK: "session",
+        },
+      },
+    })
+    const failed = await waitFor(
+      outbox,
+      (msg): msg is Extract<AgentOutboundMessage, { type: "agent_status" }> =>
+        msg.type === "agent_status" && msg.state === "error",
+    )
+    setEffort(chat)
+
+    // When the user signs in, then sends a message
+    writeFileSync(signInFile, "signed in")
+    prompt(chat, "c1", "hello")
+
+    // Then
+    expect(failed.error).toMatch(/needs you to sign in/)
+    await waitFor(outbox, turnEnd("c1"))
+    expect(replyText(outbox, "c1")).toBe("echo:hello")
+  })
+
+  it("goes on in the same conversation once the user signs in, when the agent refused a message", async () => {
+    // Given an agent that opens sessions but refuses messages until signed
+    // in, like Claude Code with an expired sign-in
+    const signInFile = join(mkdtempSync(join(tmpdir(), "sign-in-")), "creds")
+    const { chat, outbox } = await startChat({
+      launch: {
+        env: {
+          FAKE_AGENT_SIGN_IN_FILE: signInFile,
+          FAKE_AGENT_SIGN_IN_CHECK: "prompt",
+        },
+      },
+    })
+    setEffort(chat)
+    prompt(chat, "c1", "first")
+    const refused = await waitFor(outbox, turnEnd("c1"))
+
+    // When the user signs in, then sends the message again
+    writeFileSync(signInFile, "signed in")
+    const before = outbox.length
+    prompt(chat, "c1", "again")
+
+    // Then
+    expect(refused.result).toMatchObject({ outcome: "failed" })
+    await waitFor(
+      outbox,
+      (msg): msg is AgentTurnEndMessage =>
+        outbox.indexOf(msg) >= before && turnEnd("c1")(msg),
+    )
+    expect(replyText(outbox.slice(before), "c1")).toBe("echo:again")
   })
 
   it("offers the models an agent lists outside its config options, and switches between them", async () => {

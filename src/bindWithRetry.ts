@@ -33,8 +33,8 @@ export const bindWithRetry = async (params: {
     if (!isEaddrInUse(err)) throw err
     if (isPinned) {
       const tagged = new Error(
-        `could not bind ${pin.name}=${port} (EADDRINUSE). ` +
-          `Pick a different port or ${pin.unpin} to auto-allocate.`,
+        `Port ${port} (set by ${pin.name}) is in use. ` +
+          `Pick a different port, or ${pin.unpin} to use a free one.`,
       )
       ;(tagged as Error & { code?: string }).code = "port-pinned-in-use"
       throw tagged
@@ -49,9 +49,9 @@ export const bindWithRetry = async (params: {
       return { ...handle, port: nextPort }
     } catch (retryErr) {
       const tagged = new Error(
-        `auto-allocated port ${nextPort} also taken (${
+        `The free port ${nextPort} was taken too (${
           retryErr instanceof Error ? retryErr.message : String(retryErr)
-        }). Restart the MCP server to pick another.`,
+        }). Try again to pick another.`,
       )
       ;(tagged as Error & { code?: string }).code = "port-exhausted"
       throw tagged

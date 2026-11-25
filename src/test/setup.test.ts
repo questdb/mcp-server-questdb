@@ -3,8 +3,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { parseCli } from "../cli.js"
-import { buildAgents, BRIDGE_PACKAGE_SPEC } from "../setup/agents.js"
+import {
+  ALL_AGENT_IDS,
+  buildAgents,
+  BRIDGE_PACKAGE_SPEC,
+} from "../setup/agents.js"
 import { applyAgentConfig, resolveConfigPath } from "../setup/applyConfig.js"
+import { agentFlagOf } from "../setup/runSetup.js"
 import type { ExecFn, ExecResult } from "../setup/codexCli.js"
 import {
   buildBridgeEnv,
@@ -33,7 +38,7 @@ describe("agents — buildEntry", () => {
 
     // When building each entry
     // Then no env block is attached and the bridge spec is version-pinned
-    for (const id of ["claude", "cursor", "gemini"] as const) {
+    for (const id of ["claude", "cursor", "gemini", "pi"] as const) {
       expect(agents[id].buildEntry({})).toEqual({
         command: "npx",
         args: ["-y", BRIDGE_PACKAGE_SPEC],
@@ -83,9 +88,42 @@ describe("agents — buildEntry", () => {
     // When inspecting their formats
     // Then only Codex goes through `codex mcp`
     expect(agents.codex.format).toBe("codex-cli")
-    for (const id of ["claude", "cursor", "gemini", "opencode"] as const) {
+    for (const id of ["claude", "cursor", "gemini", "opencode", "pi"] as const) {
       expect(agents[id].format).toBe("json")
     }
+  })
+})
+
+describe("agents — Pi", () => {
+  it("writes Pi's user-level mcp.json, in the dir PI_CODING_AGENT_DIR names", () => {
+    // Given Pi's agent dir moved by PI_CODING_AGENT_DIR
+    const saved = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = "/tmp/pi-home/agent"
+    try {
+      // When building the agents
+      const pi = buildAgents().pi
+
+      // Then setup edits <dir>/mcp.json under mcpServers, like Claude's entry
+      expect(pi.displayName).toBe("Pi")
+      expect(pi.configPaths).toEqual([join("/tmp/pi-home/agent", "mcp.json")])
+      expect(pi.configKey).toBe("mcpServers")
+      expect(pi.detectPaths).toEqual(["/tmp/pi-home/agent"])
+      expect(pi.buildEntry({ MCP_BRIDGE_PORT: "9123" })).toEqual({
+        command: "npx",
+        args: ["-y", BRIDGE_PACKAGE_SPEC],
+        env: { MCP_BRIDGE_PORT: "9123" },
+      })
+    } finally {
+      if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = saved
+    }
+  })
+
+  it("lists Pi last among the agents setup configures", () => {
+    // Given the agents setup offers
+    // When reading their order
+    // Then Pi comes after the others
+    expect(ALL_AGENT_IDS.at(-1)).toBe("pi")
   })
 })
 
@@ -123,7 +161,14 @@ describe("resolveConfigPath", () => {
 
     // When inspecting their candidate paths
     // Then each has at least one, and OpenCode has variants
-    for (const id of ["claude", "codex", "cursor", "opencode", "gemini"] as const) {
+    for (const id of [
+      "claude",
+      "codex",
+      "cursor",
+      "opencode",
+      "gemini",
+      "pi",
+    ] as const) {
       expect(agents[id].configPaths.length).toBeGreaterThan(0)
     }
     expect(agents.opencode.configPaths.length).toBeGreaterThan(1)
@@ -383,5 +428,13 @@ describe("applyAgentConfig — codex CLI delegation", () => {
     // Then nothing is reported as written
     expect(res.status).toBe("failed")
     expect(res.error).toContain("codex mcp get")
+  })
+})
+
+describe("agentFlagOf", () => {
+  it("names the one agent set up, so connect has nothing to ask", () => {
+    expect(agentFlagOf(["codex"])).toBe(" --agent codex")
+    expect(agentFlagOf(["claude"])).toBe(" --agent claude")
+    expect(agentFlagOf(["codex", "gemini"])).toBe("")
   })
 })

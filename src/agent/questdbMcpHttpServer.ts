@@ -45,6 +45,12 @@ export const AGENT_MODE_INSTRUCTIONS = [
   "    retry.",
   "  • Your reply text shows in the console chat. Keep it short and do not",
   "    repeat SQL that you already put into cells.",
+  "  • The user knows this as using their coding agent in the AI",
+  "    Assistant. Never mention MCP, the MCP server, WebSocket, tokens or",
+  "    pairing to them.",
+  "  • Use only these tools for QuestDB. If you also have another QuestDB",
+  "    server (often named questdb), do not use it here: it needs its own",
+  "    connection, and this console is already connected to you.",
   "  • To show the user an image, save it as a PNG, JPEG, GIF or WebP file",
   "    under 5 MB and write it into your reply as a markdown image with its",
   "    absolute path: ![Price chart](/tmp/price-chart.png). The console",
@@ -55,7 +61,7 @@ export const AGENT_MODE_INSTRUCTIONS = [
 // What a tool call made while the console is away tells the agent. Agent
 // mode has no pairing tools: the console reconnects on its own.
 export const AGENT_MODE_NOT_PAIRED_RECOVERY =
-  `Recovery: the Web Console lost its connection to this MCP server, for ` +
+  `Recovery: the Web Console lost its connection to you, for ` +
   `example because its page reloaded. It usually reconnects within a few ` +
   `seconds. ` +
   `Retry this tool once after a short wait; if it fails again, stop and tell ` +

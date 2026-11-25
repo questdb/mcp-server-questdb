@@ -47,7 +47,11 @@ export type HelloAckMessage = {
   sessionId: string
   heartbeatIntervalMs: number
   seenToolCount: number
+  // Chat mode: the agent the console chats with.
   agent?: AgentInfo
+  // MCP mode: the coding agent that started this server (its MCP clientInfo
+  // name). Never sent together with `agent`.
+  mcpClient?: { name: string }
 }
 
 export type ToolCallMessage = {

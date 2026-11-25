@@ -27,7 +27,7 @@ import {
 import { AgentProcesses } from "./agentProcesses.js"
 import { LocalImageStream } from "./localImages.js"
 import { AGENT_MODE_INSTRUCTIONS } from "./questdbMcpHttpServer.js"
-import { describeAgentError } from "./agentErrors.js"
+import { describeAgentError, isAuthError } from "./agentErrors.js"
 import type { AgentLaunch } from "./agentPresets.js"
 import type { AgentSessionStore } from "./agentSessionStore.js"
 import { autoApprovalOf } from "./agentPermissions.js"
@@ -186,6 +186,10 @@ export class AgentChat implements AgentChannel {
   private routes = new Map<string, string | null>()
   private routeByConversation = new Map<string, string>()
   private activeTurns = new Map<string, ActiveTurn>()
+  // An agent CLI often reads its credentials once, when it starts. After a
+  // sign-in error the next message starts a fresh process, so a sign-in the
+  // user made meanwhile takes effect and the conversation goes on.
+  private freshProcessNeeded = false
   private pendingQuestions = new Map<string, PendingQuestion>()
   private browserAttached = false
   private outbox: AgentOutboundMessage[] = []
@@ -335,6 +339,7 @@ export class AgentChat implements AgentChannel {
       })
       return { ...created, route }
     } catch (err) {
+      if (isAuthError(err)) this.freshProcessNeeded = true
       this.setStatus({
         state: "error",
         error: describeAgentError(err, this.config.launch),
@@ -578,7 +583,17 @@ export class AgentChat implements AgentChannel {
     }
     this.activeTurns.set(conversationId, turn)
     try {
-      if (this.status.state === "error" && !this.processes.perConversation) {
+      // Only when no other conversation is answering: the restart would
+      // stop its turn too.
+      if (this.freshProcessNeeded && this.activeTurns.size === 1) {
+        this.freshProcessNeeded = false
+        await this.processes.stopAll()
+        this.forgetLiveSessions()
+        if (!this.processes.perConversation) this.start()
+      } else if (
+        this.status.state === "error" &&
+        !this.processes.perConversation
+      ) {
         this.start()
       }
       turn.connection = await this.processes
@@ -630,6 +645,7 @@ export class AgentChat implements AgentChannel {
         usage: toTokenUsage(response),
       })
     } catch (err) {
+      if (isAuthError(err)) this.freshProcessNeeded = true
       const error = describeAgentError(err, this.config.launch)
       this.config.log("ERROR", `agent turn failed: ${error}`)
       this.endTurn(conversationId, { outcome: "failed", error })

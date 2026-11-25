@@ -2,20 +2,23 @@ import type { AgentLaunch } from "./agentPresets.js"
 
 const AUTH_REQUIRED_CODE = -32000
 
+// How to sign in, as a command the user runs in a terminal; npx runs it even
+// without the agent's own CLI installed. The agent picks the sign-in up on
+// the next message (see AgentChat), so the user just sends it again.
 const SIGN_IN_HINTS: Record<string, string> = {
   claude:
-    "Sign in to Claude Code: run `claude` and use /login, or set ANTHROPIC_API_KEY before you start the MCP server.",
+    "Sign in to Claude Code: run `npx @anthropic-ai/claude-code` in your terminal and use /login. Then send your message again.",
   codex:
-    "Sign in to Codex: run `codex login`, or set OPENAI_API_KEY before you start the MCP server.",
-  pi: "Sign in to Pi: run `pi` and use /login, or set an API key for its provider before you start the MCP server.",
+    "Sign in to Codex: run `npx @openai/codex login` in your terminal. Then send your message again.",
+  pi: "Sign in to Pi: run `npx @earendil-works/pi-coding-agent` in your terminal and use /login. Then send your message again.",
   cursor:
-    "Sign in to Cursor: run `cursor-agent login`, or set CURSOR_API_KEY before you start the MCP server.",
+    "Sign in to Cursor: run `cursor-agent login` in your terminal. Then send your message again.",
   gemini:
-    "Sign in to Gemini CLI: run `npx @google/gemini-cli` once and sign in with Google, or set GEMINI_API_KEY before you start the MCP server.",
+    "Sign in to Gemini CLI: run `npx @google/gemini-cli` in your terminal and sign in with Google. Then send your message again.",
   copilot:
-    "Sign in to GitHub Copilot: run `npx @github/copilot login`, then start the agent again.",
+    "Sign in to GitHub Copilot: run `npx @github/copilot login` in your terminal. Then send your message again.",
   opencode:
-    "Sign in to OpenCode: run `npx opencode-ai auth login`, then start the agent again.",
+    "Sign in to OpenCode: run `npx opencode-ai auth login` in your terminal. Then send your message again.",
 }
 
 // Signed in, but the account may not use the agent.
@@ -29,7 +32,7 @@ const isNotAllowedError = (err: unknown): boolean => {
   return /not authorized to use this copilot feature/i.test(message)
 }
 
-const isAuthError = (err: unknown): boolean => {
+export const isAuthError = (err: unknown): boolean => {
   const code = (err as { code?: unknown } | null)?.code
   const message = err instanceof Error ? err.message : String(err)
   return (
@@ -70,7 +73,7 @@ export const describeAgentError = (
   if (isAuthError(err)) {
     return (
       SIGN_IN_HINTS[launch.id] ??
-      `${launch.label} needs you to sign in. Sign in with its own command line tool, then start the agent again.`
+      `${launch.label} needs you to sign in. Sign in with its own command line tool, then send your message again.`
     )
   }
   const message = readableMessage(

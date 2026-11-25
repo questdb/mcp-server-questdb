@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   BridgeSession,
+  mcpClientNameOf,
   type BrowserConn,
   type BridgeSessionConfig,
 } from "../bridgeSession.js"
@@ -1226,6 +1227,77 @@ describe("BridgeSession — deep link", () => {
     const { session } = makeSession({ getPort: () => 0 })
     expect(() => session.buildDeepLink()).toThrow(/not listening/)
     expect(() => session.getCredentials()).toThrow(/not listening/)
+  })
+})
+
+describe("BridgeSession — MCP client name", () => {
+  it("names the MCP client in the pairing link and the hello_ack", () => {
+    // Given a session whose MCP client said who it is
+    const { session } = makeSession()
+    session.setMcpClient("claude-code")
+    const browser = makeFakeBrowser()
+
+    // When a console pairs
+    const link = new URL(session.buildDeepLink())
+    session.attachBrowser(browser.conn)
+    sendHello(session)
+    const ack = browser.sent.find((m) => m.type === "hello_ack")
+
+    // Then
+    expect(link.searchParams.get("mcp-client")).toBe("claude-code")
+    expect(link.searchParams.get("mcp-agent")).toBeNull()
+    expect(ack).toMatchObject({ mcpClient: { name: "claude-code" } })
+    expect(ack).not.toHaveProperty("agent")
+  })
+
+  it("leaves the name out when the client sent none", () => {
+    // Given
+    const { session } = makeSession()
+    session.setMcpClient(undefined)
+    const browser = makeFakeBrowser()
+
+    // When
+    const link = new URL(session.buildDeepLink())
+    session.attachBrowser(browser.conn)
+    sendHello(session)
+    const ack = browser.sent.find((m) => m.type === "hello_ack")
+
+    // Then
+    expect(link.searchParams.has("mcp-client")).toBe(false)
+    expect(ack).not.toHaveProperty("mcpClient")
+  })
+
+  it("never names the MCP client in chat mode, where `agent` names the agent", () => {
+    // Given a chat-mode session whose agent also connected over MCP
+    const { session } = makeSession()
+    session.setMcpClient("claude-code")
+    session.attachAgentChannel({
+      info: { id: "claude", label: "Claude Code", cwd: "/work" },
+      handleBrowserMessage: vi.fn(),
+      handleRejectedMessage: vi.fn(),
+      onBrowserAttached: vi.fn(),
+      onBrowserDetached: vi.fn(),
+    })
+    const browser = makeFakeBrowser()
+
+    // When
+    const link = new URL(session.buildDeepLink())
+    session.attachBrowser(browser.conn)
+    sendHello(session)
+    const ack = browser.sent.find((m) => m.type === "hello_ack")
+
+    // Then
+    expect(link.searchParams.has("mcp-client")).toBe(false)
+    expect(ack).not.toHaveProperty("mcpClient")
+    expect(ack).toHaveProperty("agent")
+  })
+
+  it("cleans the name: no control characters, at most 64 characters", () => {
+    expect(mcpClientNameOf("  codex-mcp-client\n")).toBe("codex-mcp-client")
+    expect(mcpClientNameOf("a\u0000b\u001bc")).toBe("abc")
+    expect(mcpClientNameOf("x".repeat(100))).toBe("x".repeat(64))
+    expect(mcpClientNameOf("  ")).toBeNull()
+    expect(mcpClientNameOf(42)).toBeNull()
   })
 })
 
