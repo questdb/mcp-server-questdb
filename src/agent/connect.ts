@@ -16,11 +16,10 @@ import { AgentSessionStore } from "./agentSessionStore.js"
 import { sessionStorePath } from "./bridgeHome.js"
 import {
   AGENT_MODE_NOT_PAIRED_RECOVERY,
+  QUESTDB_MCP_SERVER_NAME,
   startQuestdbMcpHttpServer,
 } from "./questdbMcpHttpServer.js"
 import type { ResolvedConnectOptions } from "./connectOptions.js"
-
-const QUESTDB_MCP_SERVER_NAME = "questdb_console"
 
 const printLines = (lines: string[]): void => {
   writeSync(process.stderr.fd, `${lines.join("\n")}\n`)

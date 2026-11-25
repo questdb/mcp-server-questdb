@@ -1,0 +1,46 @@
+name: Agent contract
+
+# Each pinned coding agent adapter, installed from npm and run without a
+# sign-in, still speaks ACP the way the MCP server reads it
+# (src/test/contract). It needs the network, so it runs when the adapters or
+# the code that drives them change, weekly for what changes upstream, and on
+# demand.
+on:
+  pull_request:
+    paths:
+      - "src/consts/agent-installs.json"
+      - "src/agent/**"
+      - "src/test/contract/**"
+      - "vitest.contract.config.ts"
+      - "package.json"
+      - "yarn.lock"
+      - ".github/workflows/agent-contract.yml"
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: ${{ matrix.agent }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [claude, codex, gemini, copilot, opencode, pi]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - run: corepack enable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: yarn
+      - run: yarn install --immutable
+      - run: yarn test:contract
+        env:
+          CONTRACT_AGENT: ${{ matrix.agent }}

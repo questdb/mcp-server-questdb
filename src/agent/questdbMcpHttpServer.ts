@@ -16,6 +16,9 @@ import { toolResultSummary } from "../toolLog.js"
 import type { Log, ToolResultPayload, ToolSchema } from "../types.js"
 
 const MCP_PATH_PREFIX = "/mcp/"
+
+// The name the agent knows the QuestDB tools by (mcp__questdb_console__*).
+export const QUESTDB_MCP_SERVER_NAME = "questdb_console"
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024
 
 export const AGENT_MODE_INSTRUCTIONS = [
