@@ -107,7 +107,18 @@ beforeAll(() => {
 
 afterAll(() => {
   process.env = saved
-  rmSync(scratch, { recursive: true, force: true })
+  // An agent's own children can still be writing to its home for a moment
+  // after it stops. Leaving the scratch folder behind is no failure.
+  try {
+    rmSync(scratch, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 300,
+    })
+  } catch {
+    // The temp folder is the system's to clear.
+  }
 })
 
 describe.each(agents)("%s", (id) => {
