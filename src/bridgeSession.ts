@@ -639,7 +639,8 @@ export class BridgeSession {
             type: "text",
             text:
               "BROWSER_PROTOCOL_ERROR: paired browser returned a malformed " +
-              "tool_result.content (expected an array of {type:'text', text:string}). " +
+              "tool_result.content (expected an array of {type:'text', text:string} " +
+              "or {type:'image', data:base64, mimeType:'image/png'}). " +
               "Retry the tool call; if the failure persists, the browser may need " +
               "a refresh.",
           },
@@ -824,17 +825,22 @@ const isValidPermissions = (value: unknown): value is MCPPermissions =>
   typeof (value as { read?: unknown }).read === "boolean" &&
   typeof (value as { write?: unknown }).write === "boolean"
 
-const isValidToolContent = (content: unknown): content is ToolContent[] => {
-  if (!Array.isArray(content)) return false
-  for (const item of content) {
-    if (
-      typeof item !== "object" ||
-      item === null ||
-      (item as { type?: unknown }).type !== "text" ||
-      typeof (item as { text?: unknown }).text !== "string"
-    ) {
-      return false
-    }
-  }
-  return true
+// Base64 PNG data, as the browser sends a picture of a chart.
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
+
+const isValidContentItem = (item: unknown): boolean => {
+  if (typeof item !== "object" || item === null) return false
+  const { type, text, data, mimeType } = item as Record<string, unknown>
+  if (type === "text") return typeof text === "string"
+  if (type === "image")
+    return (
+      mimeType === "image/png" &&
+      typeof data === "string" &&
+      data.length > 0 &&
+      BASE64.test(data)
+    )
+  return false
 }
+
+const isValidToolContent = (content: unknown): content is ToolContent[] =>
+  Array.isArray(content) && content.every(isValidContentItem)

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import {
   BUNDLED_FUNCTIONAL_TOOLS,
   BUNDLED_TOOL_NAMES,
@@ -60,6 +61,9 @@ describe("bundledTools", () => {
       "chart_config",
       "grid",
       "highlight_config",
+      "formats",
+      "interactions",
+      "grid_mode",
     ])
     expect(tool.inputSchema.required).toEqual([
       "buffer_id",
@@ -68,6 +72,7 @@ describe("bundledTools", () => {
       "maximized_cell_id",
       "variables",
       "cells",
+      "chart_sync",
     ])
   })
 
@@ -90,6 +95,8 @@ describe("bundledTools", () => {
       "x_column",
       "queries",
       "right_axis",
+      "horizontal",
+      "thresholds",
     ])
     const props = tool.inputSchema.properties as Record<string, unknown>
     const queries = props.queries as { items: { required: string[] } }
@@ -101,7 +108,36 @@ describe("bundledTools", () => {
       "axis",
       "enabled",
       "name",
+      "events",
+      "heatmap",
+      "band",
+      "range",
+      "box",
+      "percent_stack",
+      "pie_shape",
+      "scatter",
     ])
+  })
+
+  it("ships the dashboard tools", () => {
+    const names = BUNDLED_FUNCTIONAL_TOOLS.map((t) => t.name)
+    for (const name of [
+      "get_cell_image",
+      "set_cell_visual",
+      "set_cell_custom_chart",
+      "set_cell_formats",
+      "set_cell_interactions",
+      "set_notebook_chart_sync",
+    ]) {
+      expect(names).toContain(name)
+    }
+    for (const name of [
+      "define_chart_type",
+      "get_chart_type",
+      "delete_chart_type",
+    ]) {
+      expect(names).not.toContain(name)
+    }
   })
 
   it("meta-tool descriptions carry the BRIDGE_NOT_PAIRED recovery prefix", () => {
@@ -130,5 +166,47 @@ describe("bundledTools", () => {
   it("tool names are unique", () => {
     const names = BUNDLED_FUNCTIONAL_TOOLS.map((t) => t.name)
     expect(new Set(names).size).toBe(names.length)
+  })
+
+  it("set_cell_chart_config accepts null for every nullable option", () => {
+    // Given the tool's schema, as the bridge validates calls
+    const tool = BUNDLED_FUNCTIONAL_TOOLS.find(
+      (t) => t.name === "set_cell_chart_config",
+    )
+    if (!tool) throw new Error("set_cell_chart_config missing")
+    const validate = new AjvJsonSchemaValidator().getValidator(
+      tool.inputSchema,
+    )
+    const query = {
+      type: "line",
+      y_columns: ["v"],
+      ohlc: null,
+      partition_by_column: null,
+      axis: null,
+      enabled: null,
+      name: null,
+      events: null,
+      heatmap: null,
+      band: null,
+      range: null,
+      box: null,
+      percent_stack: null,
+      pie_shape: null,
+      scatter: null,
+    }
+
+    // When an agent leaves every option alone
+    const result = validate({
+      buffer_id: 1,
+      cell_id: "c",
+      x_column: null,
+      queries: [query],
+      right_axis: null,
+      horizontal: null,
+      thresholds: null,
+    })
+
+    // Then
+    expect(result.valid).toBe(true)
   })
 })

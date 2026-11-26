@@ -1413,7 +1413,16 @@ describe("BridgeSession — tool argument validation", () => {
 describe("BridgeSession — malformed tool_result", () => {
   const malformed: Array<{ label: string; content: unknown }> = [
     { label: "null", content: null },
-    { label: "a non-text item", content: [{ type: "image" }] },
+    { label: "an image without data", content: [{ type: "image" }] },
+    {
+      label: "an image that is not base64 PNG",
+      content: [{ type: "image", mimeType: "image/png", data: "<svg/>" }],
+    },
+    {
+      label: "an image of another type",
+      content: [{ type: "image", mimeType: "image/svg+xml", data: "AAAA" }],
+    },
+    { label: "an unknown item", content: [{ type: "audio", data: "AAAA" }] },
     { label: "a text item missing its text", content: [{ type: "text" }] },
   ]
 
@@ -1443,6 +1452,37 @@ describe("BridgeSession — malformed tool_result", () => {
       expect(out.content[0]?.text).toMatch(/BROWSER_PROTOCOL_ERROR/)
     })
   }
+})
+
+describe("BridgeSession — pictures", () => {
+  it("passes a PNG picture through with its text", async () => {
+    // Given a paired session with an in-flight call
+    const { session } = makeSession()
+    const browser = makeFakeBrowser()
+    session.attachBrowser(browser.conn)
+    sendHello(session)
+    const result = session.callBrowserTool("list_cells", {})
+    const call = browser.sent.find((m) => m.type === "tool_call")
+    if (call?.type !== "tool_call") throw new Error("no tool_call")
+
+    // When the browser returns text and a picture (get_cell_image)
+    const content = [
+      { type: "text", text: '{"picture":true}' },
+      { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" },
+    ]
+    session.handleMessage({
+      v: MCP_BRIDGE_VERSION,
+      type: "tool_result",
+      requestId: call.requestId,
+      content,
+      isError: false,
+    } as unknown as AnyMessage)
+
+    // Then both reach the agent
+    const out = await result
+    expect(out.isError).toBe(false)
+    expect(out.content).toEqual(content)
+  })
 })
 
 describe("BridgeSession — send failure", () => {

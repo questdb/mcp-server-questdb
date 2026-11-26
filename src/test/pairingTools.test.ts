@@ -94,7 +94,10 @@ describe("get_pairing_credentials handler", () => {
     )
 
     const out = await handleConnectWebConsole({ auto_open_browser: false })
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(out.isError).toBeFalsy()
     expect(parsed.reason).not.toBe("incompatible_bridge")
     expect(parsed.deepLink).toContain("mcp-pair=1")
@@ -104,7 +107,10 @@ describe("get_pairing_credentials handler", () => {
   it("returns paired:false JSON when unpaired (deepLink + wsUrl + token + nextStep, camelCase)", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(makeCtx())
     const out = await handleConnectWebConsole()
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(false)
     expect(parsed.deepLink).toContain("mcp-pair=1")
     expect(parsed.wsUrl).toBe("ws://127.0.0.1:57123")
@@ -115,7 +121,10 @@ describe("get_pairing_credentials handler", () => {
   it("includes a pre-rendered userMessage that shows BOTH the deep link and ws_url+token", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(makeCtx())
     const out = await handleConnectWebConsole()
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(typeof parsed.userMessage).toBe("string")
     const msg = parsed.userMessage as string
     expect(msg).toContain("mcp-pair=1")
@@ -128,7 +137,10 @@ describe("get_pairing_credentials handler", () => {
       makeCtx({ openBrowser: () => Promise.resolve(true) }),
     )
     const out = await handleConnectWebConsole()
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.browserOpened).toMatch(/automatically opened/i)
     expect(parsed.userMessage as string).toMatch(/should have just\s+opened/i)
     // Manual fallback must survive even when the tab opened.
@@ -145,7 +157,10 @@ describe("get_pairing_credentials handler", () => {
         makeCtx({ openBrowser }),
       )
       const out = await handleConnectWebConsole()
-      const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+      const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+        string,
+        unknown
+      >
       expect(parsed.browserOpened).toMatch(/could not be opened/i)
       expect(parsed.browserOpened).toMatch(/userMessage/)
       // No misleading "a tab just opened" lead-in on the failure path.
@@ -166,7 +181,10 @@ describe("get_pairing_credentials handler", () => {
       }),
     )
     const out = await handleConnectWebConsole({ auto_open_browser: false })
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     // The launcher must not run when the agent opted out.
     expect(openCalls).toBe(0)
     // browserOpened reads as a deliberate skip, NOT a launcher failure.
@@ -192,7 +210,10 @@ describe("get_pairing_credentials handler", () => {
         }),
       )
       const out = await handleConnectWebConsole(args)
-      const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+      const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+        string,
+        unknown
+      >
       expect(openCalls).toBe(1)
       expect(parsed.browserOpened).toMatch(/automatically opened/i)
     }
@@ -201,7 +222,10 @@ describe("get_pairing_credentials handler", () => {
   it("includes assistantNextActions ordered: show user first, then call wait_for_pairing", async () => {
     const { handleConnectWebConsole } = createPairingToolHandlers(makeCtx())
     const out = await handleConnectWebConsole()
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(Array.isArray(parsed.assistantNextActions)).toBe(true)
     const actions = parsed.assistantNextActions as string[]
     expect(actions.length).toBeGreaterThanOrEqual(2)
@@ -227,7 +251,10 @@ describe("get_pairing_credentials handler", () => {
       }),
     )
     const out = await handleConnectWebConsole()
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(true)
     expect(parsed.consoleOrigin).toBe("http://127.0.0.1:9000")
     expect(parsed.permissions).toEqual({
@@ -255,7 +282,10 @@ describe("get_pairing_credentials handler", () => {
       }),
     )
     const out = await handleConnectWebConsole()
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(true)
     expect(typeof parsed.warning).toBe("string")
     expect(parsed.warning as string).toContain("0.1.0")
@@ -291,7 +321,10 @@ describe("get_pairing_credentials handler", () => {
       "standalone",
     )
     const out = await handleConnectWebConsole()
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     const expectedUrl =
       "https://github.com/questdb/mcp-server-questdb/releases/download/v0.4.1/mcp-server-questdb-0.4.1.mjs"
     expect(parsed.userMessage as string).toContain(expectedUrl)
@@ -328,7 +361,7 @@ describe("get_pairing_credentials handler", () => {
       "standalone",
     )
     const parsed = JSON.parse(
-      (await handleConnectWebConsole()).content[0].text,
+      (await handleConnectWebConsole()).content[0].text ?? "",
     ) as Record<string, unknown>
     expect(parsed.userMessage as string).toContain(
       "releases/download/v0.2.0/mcp-server-questdb-0.2.0.mjs",
@@ -358,7 +391,10 @@ describe("get_pairing_credentials handler", () => {
     )
     const out = await handleConnectWebConsole()
     expect(out.isError).toBe(true)
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(false)
     expect(parsed.reason).toBe("incompatible_bridge")
     expect(parsed.userMessage as string).toContain("v1.4.0")
@@ -383,7 +419,10 @@ describe("get_pairing_credentials handler", () => {
       "standalone",
     )
     const out = await handleConnectWebConsole()
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(out.isError).toBe(true)
     expect(parsed.userMessage as string).toContain(
       "releases/download/v1.0.0/mcp-server-questdb-1.0.0.mjs",
@@ -440,7 +479,10 @@ describe("get_pairing_credentials handler", () => {
     )
     const out = await handleConnectWebConsole()
     expect(out.isError).toBe(true)
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(false)
     expect(parsed.reason).toBe("bridge_bind_failed")
     expect(parsed.error as string).toContain("MCP_BRIDGE_PORT=9999")
@@ -468,7 +510,10 @@ describe("get_pairing_credentials handler", () => {
       }),
     )
     const out = await handleConnectWebConsole()
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(true)
     expect(called).toBe(false)
   })
@@ -483,8 +528,8 @@ describe("get_pairing_credentials handler", () => {
         },
       }),
     )
-    const a = (await handleConnectWebConsole()).content[0].text
-    const b = (await handleConnectWebConsole()).content[0].text
+    const a = (await handleConnectWebConsole()).content[0].text ?? ""
+    const b = (await handleConnectWebConsole()).content[0].text ?? ""
     expect(a).toBe(b)
     expect(calls).toBe(2)
   })
@@ -504,7 +549,10 @@ describe("wait_for_pairing handler", () => {
       }),
     )
     const out = await handleWaitForPairing({})
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(true)
     expect(parsed.consoleOrigin).toBe("http://127.0.0.1:9000")
     expect(parsed.permissions).toEqual({
@@ -534,7 +582,10 @@ describe("wait_for_pairing handler", () => {
     })
     const { handleWaitForPairing } = createPairingToolHandlers(ctx)
     const out = await handleWaitForPairing({})
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(true)
     expect(parsed.consoleOrigin).toBe("http://127.0.0.1:9000")
     expect(parsed.permissions).toEqual({
@@ -561,7 +612,10 @@ describe("wait_for_pairing handler", () => {
     })
     const { handleWaitForPairing } = createPairingToolHandlers(ctx)
     const out = await handleWaitForPairing({})
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(true)
     expect(typeof parsed.warning).toBe("string")
     expect(parsed.warning as string).toContain("0.1.0")
@@ -595,7 +649,10 @@ describe("wait_for_pairing handler", () => {
     const { handleWaitForPairing } = createPairingToolHandlers(ctx)
     const out = await handleWaitForPairing({})
     expect(out.isError).toBe(true)
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(false)
     expect(parsed.reason).toBe("incompatible_bridge")
     expect(parsed.userMessage as string).toContain(
@@ -622,14 +679,20 @@ describe("wait_for_pairing handler", () => {
     const out = await handleWaitForPairing({})
     expect(waited).toBe(false)
     expect(out.isError).toBe(true)
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.reason).toBe("incompatible_bridge")
   })
 
   it("returns timeout payload on timeout, with retry guidance (camelCase)", async () => {
     const { handleWaitForPairing } = createPairingToolHandlers(makeCtx())
     const out = await handleWaitForPairing({ timeout_ms: 1000 })
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(false)
     expect(parsed.reason).toBe("timeout")
     expect(parsed.retryCount).toBe(1)
@@ -661,15 +724,15 @@ describe("wait_for_pairing handler", () => {
     })
     const { handleWaitForPairing } = createPairingToolHandlers(ctx)
     const r1 = JSON.parse(
-      (await handleWaitForPairing({})).content[0].text,
+      (await handleWaitForPairing({})).content[0].text ?? "",
     ) as Record<string, unknown>
     expect(r1.retryCount).toBe(1)
     const r2 = JSON.parse(
-      (await handleWaitForPairing({})).content[0].text,
+      (await handleWaitForPairing({})).content[0].text ?? "",
     ) as Record<string, unknown>
     expect(r2.retryCount).toBe(2)
     const r3 = JSON.parse(
-      (await handleWaitForPairing({})).content[0].text,
+      (await handleWaitForPairing({})).content[0].text ?? "",
     ) as Record<string, unknown>
     expect(r3.paired).toBe(true)
   })
@@ -698,7 +761,10 @@ describe("wait_for_pairing handler", () => {
     })
     const { handleWaitForPairing, counters } = createPairingToolHandlers(ctx)
     const out = await handleWaitForPairing({})
-    const parsed = JSON.parse(out.content[0].text) as Record<string, unknown>
+    const parsed = JSON.parse(out.content[0].text ?? "") as Record<
+      string,
+      unknown
+    >
     expect(parsed.paired).toBe(false)
     expect(parsed.reason).toBe("rate_limited")
     expect(typeof parsed.message).toBe("string")
@@ -720,7 +786,7 @@ describe("wait_for_pairing handler", () => {
     expect(counters.waitRetries).toBe(0)
     nextResult = "timeout"
     const r = JSON.parse(
-      (await handleWaitForPairing({})).content[0].text,
+      (await handleWaitForPairing({})).content[0].text ?? "",
     ) as Record<string, unknown>
     expect(r.retryCount).toBe(1)
   })
