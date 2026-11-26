@@ -41,9 +41,10 @@ describe("createBrowserConn — outbound send", () => {
     const conn = createBrowserConn(socket, {})
 
     // When a frame is sent
-    conn.send(ping)
+    const written = conn.send(ping)
 
     // Then it is serialized and written, and the socket is not terminated
+    expect(written).toBe(true)
     expect(socket.sent).toEqual([JSON.stringify(ping)])
     expect(socket.terminated).toBe(false)
   })
@@ -55,9 +56,10 @@ describe("createBrowserConn — outbound send", () => {
     const conn = createBrowserConn(socket, { bufferLimitBytes: 10, log })
 
     // When a frame is sent
-    conn.send(ping)
+    const written = conn.send(ping)
 
     // Then nothing is written, the socket is terminated, and it is logged
+    expect(written).toBe(false)
     expect(socket.sent).toEqual([])
     expect(socket.terminated).toBe(true)
     expect(log).toHaveBeenCalledWith("WARN", expect.stringContaining("overflow"))
@@ -69,9 +71,10 @@ describe("createBrowserConn — outbound send", () => {
     const conn = createBrowserConn(socket, {})
 
     // When a frame is sent
-    conn.send(ping)
+    const written = conn.send(ping)
 
-    // Then nothing is written
+    // Then nothing is written, and the caller is told
+    expect(written).toBe(false)
     expect(socket.sent).toEqual([])
   })
 })

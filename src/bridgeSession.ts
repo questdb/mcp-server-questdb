@@ -1,5 +1,33 @@
+// Glossary. Code names follow the protocols; the user only ever sees "your
+// coding agent" or the agent's name (Claude Code, Codex, ...).
+//
+// - bridge: this process. It speaks MCP to a coding agent and WebSocket to one
+//   Web Console tab. Users know the package as the "MCP server"; the console
+//   never names it.
+// - pair / pairing: the WebSocket handshake with a console tab (deep link or
+//   address + key, then consent). The user sees it as "connect".
+// - MCP mode (`index.ts`, started by the agent's MCP config): the user talks to
+//   the agent in their terminal or IDE; the agent calls console tools. The
+//   agent's MCP clientInfo name reaches the console as `mcpClient`.
+// - Chat mode (`connect`, `src/agent/`): this process runs an ACP agent and the
+//   user chats with it in the console's AI Assistant. The console learns it
+//   through `agent` (deep link `mcp-agent`, hello_ack `agent`). `agent` and
+//   `mcpClient` are never sent together: the console reads the mode from them.
+// - "agent" in `src/setup/` means a coding agent whose MCP config we write; in
+//   `src/agent/` it means the agent process chat mode runs. Same programs,
+//   different roles.
 import { randomBytes } from "node:crypto"
 import { MCP_BRIDGE_VERSION, parseMajor } from "./protocolVersion.js"
+import type {
+  AgentInboundMessage,
+  AgentInfo,
+  AgentOutboundMessage,
+} from "./agentProtocol.js"
+import {
+  parseInboundAgentMessage,
+  rejectionOf,
+  type InboundRejection,
+} from "./agent/inboundMessages.js"
 import type {
   AnyMessage,
   CancelMessage,
@@ -17,6 +45,7 @@ import type {
 } from "./types.js"
 import { WS_CLOSE_CODES } from "./types.js"
 import type { PairingSnapshot, VersionMismatch } from "./pairingTools.js"
+import { BUNDLED_FUNCTIONAL_TOOLS } from "./bundledTools.js"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 
 const HEARTBEAT_INTERVAL_MS = 5_000
@@ -108,17 +137,42 @@ const DENIED_PERMISSIONS: MCPPermissions = {
 }
 
 export type BrowserConn = {
-  send: (msg: AnyMessage) => void
+  // Whether the frame was written to the socket; false when the socket is no
+  // longer open or its outbound buffer overflowed.
+  send: (msg: AnyMessage) => boolean
   close: (code: number, reason: string) => void
   terminate: () => void
 }
+
+export type AgentChannel = {
+  info: AgentInfo
+  handleBrowserMessage: (msg: AgentInboundMessage) => void
+  // A frame that failed validation, which the console waits on an answer to.
+  handleRejectedMessage: (rejection: InboundRejection) => void
+  // `sameConsole`: the console that left is back, with the turns it started.
+  // False for a fresh console, like a reloaded page, which knows none of them.
+  onBrowserAttached: (sameConsole: boolean) => void
+  onBrowserDetached: () => void
+}
+
+const DEFAULT_NOT_PAIRED_RECOVERY =
+  `Recovery: call \`get_pairing_credentials\` to get a pairing URL ` +
+  `(present its \`userMessage\` to the user: it has BOTH the link AND ` +
+  `the manual address + key), then call \`wait_for_pairing\` until ` +
+  `{paired:true}, then retry this tool.`
 
 export type BridgeSessionConfig = {
   token: string
   getPort: () => number
   consoleOrigin: string
+  // The Web Console's address, when it is served under a path. The pairing
+  // link opens it; defaults to the origin.
+  consoleUrl?: string
   getDeadlineMs: (toolName: string) => number | null
   log?: Log
+  // What a tool call made while no console is paired tells the caller to do.
+  // Defaults to the pairing flow of the MCP server's pairing tools.
+  notPairedRecovery?: string
 }
 
 type InflightCall = {
@@ -152,6 +206,16 @@ const generateSessionId = (): string => {
   return `s-${t}-${r}`
 }
 
+// The name an MCP client sends in `initialize` (clientInfo.name), cleaned for
+// a URL and the console: control characters dropped, at most 64 characters.
+const MAX_MCP_CLIENT_NAME = 64
+export const mcpClientNameOf = (raw: unknown): string | null => {
+  if (typeof raw !== "string") return null
+  // eslint-disable-next-line no-control-regex
+  const name = raw.replace(/[\u0000-\u001f\u007f]/g, "").trim()
+  return name ? name.slice(0, MAX_MCP_CLIENT_NAME) : null
+}
+
 export class BridgeSession {
   private state: SessionState = "S0"
   private browser: BrowserConn | null = null
@@ -175,8 +239,37 @@ export class BridgeSession {
   private connClosing = false
   private detachedSessionId: string | null = null
   private connectingLastSessionId: string | undefined = undefined
+  private agentChannel: AgentChannel | null = null
+  // MCP mode only: the coding agent that started this server, so the console
+  // can name it. Chat mode names its agent through `agentChannel` instead.
+  private mcpClientName: string | null = null
 
   constructor(private config: BridgeSessionConfig) {}
+
+  attachAgentChannel(channel: AgentChannel): void {
+    this.agentChannel = channel
+  }
+
+  setMcpClient(rawName: unknown): void {
+    this.mcpClientName = mcpClientNameOf(rawName)
+  }
+
+  // The MCP client's name, only when no chat agent is attached: the console
+  // reads `agent` as chat mode and `mcpClient` as MCP mode, never both.
+  private mcpClientForConsole(): string | null {
+    return this.agentChannel ? null : this.mcpClientName
+  }
+
+  sendToBrowser(msg: AgentOutboundMessage): boolean {
+    if (this.state !== "S1" || !this.browser) return false
+    return this.browser.send(msg)
+  }
+
+  getAdvertisedTools(): ToolSchema[] {
+    return this.browserTools.length > 0
+      ? this.browserTools
+      : BUNDLED_FUNCTIONAL_TOOLS
+  }
 
   getState(): SessionState {
     return this.state
@@ -198,7 +291,15 @@ export class BridgeSession {
       "mcp-ws": this.wsUrl(),
       "mcp-token": this.config.token,
     })
-    return `${this.config.consoleOrigin}/?${params.toString()}`
+    // The console names the agent and its workspace in the consent dialog,
+    // before any connection exists.
+    if (this.agentChannel) {
+      params.set("mcp-agent", this.agentChannel.info.label)
+      params.set("mcp-agent-cwd", this.agentChannel.info.cwd)
+    }
+    const mcpClient = this.mcpClientForConsole()
+    if (mcpClient) params.set("mcp-client", mcpClient)
+    return `${this.config.consoleUrl ?? this.config.consoleOrigin}/?${params.toString()}`
   }
 
   getCredentials(): { wsUrl: string; token: string } {
@@ -364,9 +465,28 @@ export class BridgeSession {
       case "pong":
         this.handlePong(msg)
         return
+      case "agent_prompt":
+      case "agent_cancel":
+      case "agent_question_answer":
+      case "agent_settings":
+      case "agent_restart":
+        this.routeAgentMessage(msg)
+        return
       default:
         return
     }
+  }
+
+  private routeAgentMessage(msg: unknown): void {
+    if (this.state !== "S1" || !this.agentChannel) return
+    const parsed = parseInboundAgentMessage(msg)
+    if (!parsed) {
+      this.config.log?.("WARN", "agent frame rejected: malformed")
+      const rejection = rejectionOf(msg)
+      if (rejection) this.agentChannel.handleRejectedMessage(rejection)
+      return
+    }
+    this.agentChannel.handleBrowserMessage(parsed)
   }
 
   handleSocketClose(conn: BrowserConn): void {
@@ -378,6 +498,7 @@ export class BridgeSession {
     toolName: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
+    conversationId?: string,
   ): Promise<ToolResultPayload> {
     if (this.state !== "S1" || !this.browser) {
       return Promise.resolve({
@@ -387,10 +508,7 @@ export class BridgeSession {
             text:
               `BRIDGE_NOT_PAIRED: This tool requires a paired QuestDB Web ` +
               `Console.\n` +
-              `Recovery: call \`get_pairing_credentials\` to get a pairing URL ` +
-              `(present BOTH the deep link AND the manual ws_url + token to ` +
-              `the user), then call \`wait_for_pairing\` until ` +
-              `{paired:true}, then retry this tool.`,
+              (this.config.notPairedRecovery ?? DEFAULT_NOT_PAIRED_RECOVERY),
           },
         ],
         isError: true,
@@ -508,6 +626,7 @@ export class BridgeSession {
         name: toolName,
         arguments: args,
         deadlineMs: deadlineMs,
+        ...(conversationId !== undefined ? { conversationId } : {}),
       }
       try {
         this.browser?.send(call)
@@ -583,6 +702,14 @@ export class BridgeSession {
     // Kept across a reconnect (resumeSessionOn leaves it set) so the console's
     // stored value stays valid; minted fresh for a first pairing or a re-pair
     // after a real detach, where transitionToS0 nulled it.
+    // The console that left is back when it echoes the session it was issued:
+    // the one it detached from, or the live one it takes over. A reloaded page
+    // echoes none.
+    const lastSessionId = this.connectingLastSessionId
+    const isSameConsole =
+      lastSessionId !== undefined &&
+      (lastSessionId === this.detachedSessionId ||
+        lastSessionId === this.sessionId)
     this.sessionId = this.sessionId ?? generateSessionId()
     this.browserConsoleOrigin = msg.consoleOrigin
     this.browserTools = msg.tools
@@ -604,12 +731,15 @@ export class BridgeSession {
         this.cancelDisconnectGrace(call)
       }
     }
+    const mcpClient = this.mcpClientForConsole()
     const ack: HelloAckMessage = {
       v: MCP_BRIDGE_VERSION,
       type: "hello_ack",
       sessionId: this.sessionId,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       seenToolCount: this.browserTools.length,
+      ...(this.agentChannel ? { agent: this.agentChannel.info } : {}),
+      ...(mcpClient ? { mcpClient: { name: mcpClient } } : {}),
     }
     this.browser?.send(ack)
 
@@ -622,6 +752,7 @@ export class BridgeSession {
     }
 
     this.startHeartbeat()
+    this.agentChannel?.onBrowserAttached(isSameConsole)
   }
 
   private handleToolResult(msg: ToolResultMessage): void {
@@ -718,6 +849,7 @@ export class BridgeSession {
     this.browser = null
     this.connClosing = false
     this.transitionToS0()
+    this.agentChannel?.onBrowserDetached()
   }
 
   private rebuildToolValidators(): void {

@@ -18,6 +18,7 @@ import { BUNDLED_FUNCTIONAL_TOOLS } from "./bundledTools.js"
 import { MCP_BRIDGE_VERSION } from "./protocolVersion.js"
 import { openInBrowser } from "./openBrowser.js"
 import type { BridgeSession } from "./bridgeSession.js"
+import { toolResultSummary } from "./toolLog.js"
 import type { Log, ToolResultPayload } from "./types.js"
 
 const SERVER_NAME = "mcp-server-questdb"
@@ -53,7 +54,7 @@ const SERVER_INSTRUCTIONS = [
   "════════════════════ PAIRING FLOW — READ FIRST ════════════════════",
   "",
   "Before ANY functional tool works, the user must pair their browser",
-  "to this bridge. Do these THREE steps in a SINGLE assistant turn,",
+  "to this MCP server. Do these THREE steps in a SINGLE assistant turn,",
   "in order. The #1 reason this fails is skipping step 2.",
   "",
   "  STEP 1 — Call `get_pairing_credentials`.",
@@ -63,16 +64,16 @@ const SERVER_INSTRUCTIONS = [
   "  STEP 2 — Write a message to the user (MANDATORY — DO NOT SKIP).",
   "    Copy the `userMessage` field from STEP 1's response verbatim",
   "    into your message to the user. It already contains BOTH the",
-  "    one-click deep link AND the manual ws_url + token in a",
+  "    one-click link AND the manual address + key in a",
   "    ready-to-paste format.",
   "    If you skip STEP 2: the user sees nothing actionable, has no",
   "    credentials to enter, and STEP 3 will just time out forever.",
-  "    No exceptions. No \"I'll wait for status first.\" Show the",
+  '    No exceptions. No "I\'ll wait for status first." Show the',
   "    message, THEN call STEP 3.",
   "",
   "  STEP 3 — Call `wait_for_pairing` in the defined order.",
   "    Do not end your turn between STEP 2 and STEP 3. Do not say",
-  "    \"I'll poll later\" and stop — actually call the tool now.",
+  '    "I\'ll poll later" and stop — actually call the tool now.',
   "    It blocks up to 50 s. On {paired:false, reason:'timeout'},",
   "    call wait_for_pairing again (up to ~10 retries / ~8 min).",
   "    On {paired:true}, retry whatever functional tool you were",
@@ -86,11 +87,18 @@ const SERVER_INSTRUCTIONS = [
   "  ✗ Ending your turn after get_pairing_credentials. The user is left",
   "    hanging with credentials they may not even see because you",
   "    haven't displayed them.",
-  "  ✗ Telling the user \"QuestDB has no chart tool\" or similar — the",
+  '  ✗ Telling the user "QuestDB has no chart tool" or similar — the',
   "    chart tools are in the catalog; they just need pairing first.",
   "  ✗ Skipping the `userMessage` and improvising your own that omits",
-  "    either the deep link OR the ws_url+token. Always show BOTH so",
+  "    either the link OR the address + key. Always show BOTH so",
   "    the user can pick whichever works for them.",
+  "",
+  "How to talk about it: the user knows this as connecting their",
+  'coding agent (you) to the QuestDB Web Console. Say "connect",',
+  'not "pair", and never mention MCP, the MCP server, WebSocket or',
+  'tokens to them. The console shows "Connect agent" at the bottom',
+  'of the screen, and your name (or "Agent") there once you are',
+  "connected.",
   "",
   "═══════════════════════════════════════════════════════════════════",
   "",
@@ -123,7 +131,8 @@ const SERVER_INSTRUCTIONS = [
   "",
   "Operations outside the granted scope return PERMISSION_DENIED naming",
   "the missing scope — adjust your plan and tell the user how to grant",
-  "it (QuestDB console footer → MCP popover). Do NOT retry blindly.",
+  "it (QuestDB Web Console: click the agent status at the bottom of the",
+  "screen, then Permissions). Do NOT retry blindly.",
   "",
   "═══════════════════════════════════════════════════════════════════",
   "",
@@ -136,7 +145,7 @@ const SERVER_INSTRUCTIONS = [
   "Verifying current state before answering:",
   "  The user can change notebook state at any time (switching tabs,",
   "  editing cells, dragging layout). Before answering questions about",
-  "  \"current cell\", \"this notebook\", \"the active chart\", or anything",
+  '  "current cell", "this notebook", "the active chart", or anything',
   "  that depends on what the user is looking at right now, ALWAYS",
   "  call `get_workspace_state` first. Do not rely on prior tool",
   "  results — the user may have changed things since. Tool results",
@@ -168,6 +177,7 @@ export const dispatchToolCall = async (
   const { session, pairing, log } = ctx
   log?.("INFO", `tool_call: ${name}`)
   log?.("DEBUG", `  args: ${JSON.stringify(args) ?? "undefined"}`)
+  const startedAt = Date.now()
 
   try {
     let result: ToolResultPayload
@@ -180,9 +190,11 @@ export const dispatchToolCall = async (
       result = await session.callBrowserTool(name, args, signal)
     }
     const isError = result.isError === true
+    // A failed call is the client's to handle, like a query with a typo:
+    // WARN with the reason. ERROR is for the bridge's own failures.
     log?.(
-      isError ? "ERROR" : "INFO",
-      `tool_result: ${name} ${isError ? "error" : "ok"}`,
+      isError ? "WARN" : "INFO",
+      toolResultSummary(name, result, Date.now() - startedAt),
     )
     if (name === "get_pairing_credentials") {
       const summary = safePairingCredentialsSummary(result.content)
@@ -204,7 +216,7 @@ export const dispatchToolCall = async (
         {
           type: "text",
           text:
-            "INTERNAL_ERROR: the bridge failed to forward this call. " +
+            "INTERNAL_ERROR: the MCP server failed to forward this call. " +
             "Retry; if the failure persists, refresh the browser tab.",
         },
       ],
@@ -235,6 +247,11 @@ export const startMcpServer = async ({
       instructions: SERVER_INSTRUCTIONS,
     },
   )
+
+  // The console shows the coding agent's name, e.g. "Claude Code connected".
+  server.oninitialized = () => {
+    session.setMcpClient(server.getClientVersion()?.name)
+  }
 
   const pairingCtx: PairingToolsContext = {
     beginPairingAttempt: () => session.beginPairingAttempt(),
@@ -281,14 +298,22 @@ export const startMcpServer = async ({
     prompts: [],
   }))
 
-  const STATIC_TOOL_LIST = [CONNECT_TOOL, WAIT_TOOL, ...BUNDLED_FUNCTIONAL_TOOLS]
+  const STATIC_TOOL_LIST = [
+    CONNECT_TOOL,
+    WAIT_TOOL,
+    ...BUNDLED_FUNCTIONAL_TOOLS,
+  ]
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: STATIC_TOOL_LIST,
   }))
 
   server.setRequestHandler(CallToolRequestSchema, (req, extra) =>
     dispatchToolCall(
-      { session, pairing: { handleConnectWebConsole, handleWaitForPairing }, log },
+      {
+        session,
+        pairing: { handleConnectWebConsole, handleWaitForPairing },
+        log,
+      },
       req.params.name,
       req.params.arguments ?? {},
       extra.signal,

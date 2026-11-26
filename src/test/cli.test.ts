@@ -9,6 +9,23 @@ describe("parseCli", () => {
     expect(parseCli(["start"], "1.2.3", HELP)).toEqual({ kind: "start" })
   })
 
+  it("passes everything after `connect` on to it, and knows no `serve`", () => {
+    expect(
+      parseCli(
+        ["connect", "https://a.example", "--agent", "codex"],
+        "1.2.3",
+        HELP,
+      ),
+    ).toEqual({
+      kind: "connect",
+      args: ["https://a.example", "--agent", "codex"],
+    })
+    expect(parseCli(["serve"], "1.2.3", HELP)).toMatchObject({
+      kind: "exit",
+      code: 2,
+    })
+  })
+
   it("prints the version and exits 0 for --version and -v", () => {
     expect(parseCli(["--version"], "1.2.3", HELP)).toEqual({
       kind: "exit",
@@ -78,5 +95,17 @@ describe("parsePort", () => {
   it("errors on out-of-range ports", () => {
     expect("error" in parsePort("0")).toBe(true)
     expect("error" in parsePort("70000")).toBe(true)
+  })
+
+  it("names the setting the value came from", () => {
+    expect(parsePort("abc")).toEqual({
+      error: "MCP_BRIDGE_PORT=abc must be an integer",
+    })
+    expect(parsePort("abc", "--port")).toEqual({
+      error: "--port abc must be an integer",
+    })
+    expect(parsePort("70000", "--port")).toEqual({
+      error: "--port 70000 is out of range",
+    })
   })
 })

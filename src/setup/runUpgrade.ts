@@ -274,15 +274,15 @@ export const runUpgrade = async (): Promise<number> => {
 
   if (reported.length === 0) {
     console.log(
-      `  No coding-agent config has a "questdb" MCP server.\n` +
-        `  Run \`${setupCommand(target)}\` to configure one.`,
+      `  No coding agent is set up for the QuestDB Web Console yet.\n` +
+        `  Run \`${setupCommand(target)}\` to set one up.`,
     )
   } else {
     console.log(reported.join("\n"))
   }
   if (changed > 0) {
     console.log(
-      `\nRestart your coding agent (or reload its MCP servers) so v${target} launches.`,
+      `\nRestart your coding agent (or reload its MCP servers) so it uses v${target}, then ask it to connect to the QuestDB Web Console again.`,
     )
   }
   return failed > 0 ? 1 : 0

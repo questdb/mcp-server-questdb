@@ -8,7 +8,13 @@ import {
 } from "../distribution.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
 
-export type AgentId = "claude" | "codex" | "cursor" | "opencode" | "gemini"
+export type AgentId =
+  | "claude"
+  | "codex"
+  | "cursor"
+  | "opencode"
+  | "gemini"
+  | "pi"
 
 // LOG_PATH / LOG_LEVEL are deliberately omitted; users add them by hand to debug.
 export type BridgeEnv = {
@@ -49,6 +55,11 @@ const claudeGlobalConfigPath = (): string =>
 
 const codexHome = (): string =>
   process.env.CODEX_HOME || join(homedir(), ".codex")
+
+// Pi reads user-level MCP servers from <agent dir>/mcp.json; PI_CODING_AGENT_DIR
+// moves the agent dir, as Pi itself honors it.
+const piAgentDir = (): string =>
+  process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent")
 
 export const buildAgents = (
   channel: DistributionChannel = DISTRIBUTION_CHANNEL,
@@ -123,13 +134,25 @@ export const buildAgents = (
       buildEntry: jsonStdioEntry,
       detectPaths: [join(homedir(), ".gemini")],
     },
+    pi: {
+      id: "pi",
+      displayName: "Pi",
+      format: "json",
+      configPaths: [join(piAgentDir(), "mcp.json")],
+      configKey: "mcpServers",
+      envKey: "env",
+      buildEntry: jsonStdioEntry,
+      detectPaths: [piAgentDir()],
+    },
   }
 }
 
+// The same order as `connect --agent` and the console.
 export const ALL_AGENT_IDS: AgentId[] = [
   "claude",
   "codex",
+  "gemini",
   "cursor",
   "opencode",
-  "gemini",
+  "pi",
 ]

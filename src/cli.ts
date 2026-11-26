@@ -7,6 +7,7 @@ export type CliOutcome =
   | { kind: "start" }
   | { kind: "setup" }
   | { kind: "upgrade" }
+  | { kind: "connect"; args: string[] }
   | { kind: "exit"; code: number; stdout?: string; stderr?: string }
 
 // Pure mapping from argv to an outcome. The caller performs the actual writes
@@ -20,11 +21,15 @@ export const parseCli = (
 ): CliOutcome => {
   const command = argv[0]
 
+  // Coding agents launch the MCP server with no command. `start` is left out
+  // of the help, but configs written by hand from older docs still use it.
   if (command === undefined || command === "start") return { kind: "start" }
 
   if (command === "setup") return { kind: "setup" }
 
   if (command === "upgrade") return { kind: "upgrade" }
+
+  if (command === "connect") return { kind: "connect", args: argv.slice(1) }
 
   if (command === "-v" || command === "--version") {
     return { kind: "exit", code: 0, stdout: `${version}\n` }
@@ -45,16 +50,22 @@ export const parseCli = (
 
 export type PortChoice = { auto: true } | { pinned: number } | { error: string }
 
-// Validate MCP_BRIDGE_PORT. Unset/empty → auto-allocate; a valid 1-65535 integer
+// Validate a port setting. Unset/empty → auto-allocate; a valid 1-65535 integer
 // → pinned; anything else → an error the caller turns into a fatal exit(2).
-export const parsePort = (raw: string | undefined): PortChoice => {
+// `source` names where the value came from, as the user wrote it.
+export const parsePort = (
+  raw: string | undefined,
+  source: "MCP_BRIDGE_PORT" | "--port" = "MCP_BRIDGE_PORT",
+): PortChoice => {
   if (raw === undefined || raw === "") return { auto: true }
+  const setting =
+    source === "--port" ? `--port ${raw}` : `MCP_BRIDGE_PORT=${raw}`
   if (!/^\d+$/.test(raw)) {
-    return { error: `MCP_BRIDGE_PORT=${raw} must be an integer` }
+    return { error: `${setting} must be an integer` }
   }
   const n = Number(raw)
   if (n < 1 || n > 65535) {
-    return { error: `MCP_BRIDGE_PORT=${raw} is out of range` }
+    return { error: `${setting} is out of range` }
   }
   return { pinned: n }
 }

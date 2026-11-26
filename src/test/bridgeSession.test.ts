@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   BridgeSession,
+  mcpClientNameOf,
   type BrowserConn,
   type BridgeSessionConfig,
 } from "../bridgeSession.js"
+import type {
+  AgentPromptMessage,
+  AgentStatusMessage,
+} from "../agentProtocol.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
+import { WebSocket } from "ws"
+import { createBrowserConn } from "../wsServer.js"
 import {
   WS_CLOSE_CODES,
   type AnyMessage,
@@ -30,6 +37,7 @@ const makeFakeBrowser = () => {
   const conn: BrowserConn = {
     send: (msg) => {
       sent.push(msg)
+      return true
     },
     close: (code, reason) => {
       closed = { code, reason }
@@ -1222,6 +1230,77 @@ describe("BridgeSession — deep link", () => {
   })
 })
 
+describe("BridgeSession — MCP client name", () => {
+  it("names the MCP client in the pairing link and the hello_ack", () => {
+    // Given a session whose MCP client said who it is
+    const { session } = makeSession()
+    session.setMcpClient("claude-code")
+    const browser = makeFakeBrowser()
+
+    // When a console pairs
+    const link = new URL(session.buildDeepLink())
+    session.attachBrowser(browser.conn)
+    sendHello(session)
+    const ack = browser.sent.find((m) => m.type === "hello_ack")
+
+    // Then
+    expect(link.searchParams.get("mcp-client")).toBe("claude-code")
+    expect(link.searchParams.get("mcp-agent")).toBeNull()
+    expect(ack).toMatchObject({ mcpClient: { name: "claude-code" } })
+    expect(ack).not.toHaveProperty("agent")
+  })
+
+  it("leaves the name out when the client sent none", () => {
+    // Given
+    const { session } = makeSession()
+    session.setMcpClient(undefined)
+    const browser = makeFakeBrowser()
+
+    // When
+    const link = new URL(session.buildDeepLink())
+    session.attachBrowser(browser.conn)
+    sendHello(session)
+    const ack = browser.sent.find((m) => m.type === "hello_ack")
+
+    // Then
+    expect(link.searchParams.has("mcp-client")).toBe(false)
+    expect(ack).not.toHaveProperty("mcpClient")
+  })
+
+  it("never names the MCP client in chat mode, where `agent` names the agent", () => {
+    // Given a chat-mode session whose agent also connected over MCP
+    const { session } = makeSession()
+    session.setMcpClient("claude-code")
+    session.attachAgentChannel({
+      info: { id: "claude", label: "Claude Code", cwd: "/work" },
+      handleBrowserMessage: vi.fn(),
+      handleRejectedMessage: vi.fn(),
+      onBrowserAttached: vi.fn(),
+      onBrowserDetached: vi.fn(),
+    })
+    const browser = makeFakeBrowser()
+
+    // When
+    const link = new URL(session.buildDeepLink())
+    session.attachBrowser(browser.conn)
+    sendHello(session)
+    const ack = browser.sent.find((m) => m.type === "hello_ack")
+
+    // Then
+    expect(link.searchParams.has("mcp-client")).toBe(false)
+    expect(ack).not.toHaveProperty("mcpClient")
+    expect(ack).toHaveProperty("agent")
+  })
+
+  it("cleans the name: no control characters, at most 64 characters", () => {
+    expect(mcpClientNameOf("  codex-mcp-client\n")).toBe("codex-mcp-client")
+    expect(mcpClientNameOf("a\u0000b\u001bc")).toBe("abc")
+    expect(mcpClientNameOf("x".repeat(100))).toBe("x".repeat(64))
+    expect(mcpClientNameOf("  ")).toBeNull()
+    expect(mcpClientNameOf(42)).toBeNull()
+  })
+})
+
 describe("BridgeSession — tool argument validation", () => {
   const strictTools: ToolSchema[] = [
     {
@@ -1453,6 +1532,7 @@ describe("BridgeSession — send failure", () => {
     const conn: BrowserConn = {
       send: (msg) => {
         if (msg.type === "tool_call") throw new Error("socket dead")
+        return true
       },
       close: () => {},
       terminate: () => {},
@@ -1579,5 +1659,257 @@ describe("BridgeSession — timer lifecycle", () => {
     expect(out.isError).toBe(true)
     expect(out.content[0]?.text).toMatch(/cancelled/)
     expect(vi.getTimerCount()).toBe(baselineTimers)
+  })
+})
+
+describe("BridgeSession — agent channel", () => {
+  const agentInfo = { id: "claude", label: "Claude Code", cwd: "/work" }
+
+  const makeAgentChannel = () => ({
+    info: agentInfo,
+    handleBrowserMessage: vi.fn(),
+    handleRejectedMessage: vi.fn(),
+    onBrowserAttached: vi.fn(),
+    onBrowserDetached: vi.fn(),
+  })
+
+  const agentPrompt: AgentPromptMessage = {
+    v: MCP_BRIDGE_VERSION,
+    type: "agent_prompt",
+    conversationId: "c1",
+    turnId: "t1",
+    prompt: [{ type: "text", text: "hi" }],
+  }
+
+  it("names the agent in the pairing link and the hello_ack, and tells the agent when the console pairs and leaves", () => {
+    // Given a session with an agent channel
+    const { session } = makeSession()
+    const channel = makeAgentChannel()
+    session.attachAgentChannel(channel)
+    const browser = makeFakeBrowser()
+
+    // When a console pairs, then its socket closes
+    const link = new URL(session.buildDeepLink())
+    session.attachBrowser(browser.conn)
+    const attachedBeforeHello = channel.onBrowserAttached.mock.calls.length
+    sendHello(session)
+    const ack = browser.sent.find((m) => m.type === "hello_ack")
+    const detachedWhilePaired = channel.onBrowserDetached.mock.calls.length
+    session.handleSocketClose(browser.conn)
+
+    // Then
+    expect(link.searchParams.get("mcp-agent")).toBe("Claude Code")
+    expect(link.searchParams.get("mcp-agent-cwd")).toBe("/work")
+    expect(ack).toMatchObject({ type: "hello_ack", agent: agentInfo })
+    expect(attachedBeforeHello).toBe(0)
+    expect(channel.onBrowserAttached).toHaveBeenCalledTimes(1)
+    expect(detachedWhilePaired).toBe(0)
+    expect(channel.onBrowserDetached).toHaveBeenCalledTimes(1)
+  })
+
+  it("passes on agent frames only from a paired console, and only well formed ones", () => {
+    // Given a session with an agent channel and a connected console
+    const log = vi.fn()
+    const { session } = makeSession({ log })
+    const channel = makeAgentChannel()
+    session.attachAgentChannel(channel)
+    const browser = makeFakeBrowser()
+    session.attachBrowser(browser.conn)
+
+    // When the console sends a prompt before its hello, then a malformed one
+    // and a well formed one after it
+    session.handleMessage(agentPrompt)
+    sendHello(session)
+    session.handleMessage({ ...agentPrompt, conversationId: "" })
+    session.handleMessage(agentPrompt)
+
+    // Then only the well formed prompt from the paired console reaches the agent
+    expect(channel.handleBrowserMessage).toHaveBeenCalledTimes(1)
+    expect(channel.handleBrowserMessage).toHaveBeenCalledWith(agentPrompt)
+    expect(log).toHaveBeenCalledWith("WARN", "agent frame rejected: malformed")
+  })
+
+  it("sends agent frames only to a paired console, and names the conversation of a tool call", async () => {
+    // Given a session with an agent channel
+    const { session } = makeSession()
+    session.attachAgentChannel(makeAgentChannel())
+    const browser = makeFakeBrowser()
+    const status: AgentStatusMessage = {
+      v: MCP_BRIDGE_VERSION,
+      type: "agent_status",
+      state: "ready",
+      config: null,
+      error: null,
+      commands: [],
+      acceptsImages: false,
+    }
+
+    // When the agent sends before a console connects, while it connects, and
+    // once it has paired, then calls a tool
+    const sentUnconnected = session.sendToBrowser(status)
+    session.attachBrowser(browser.conn)
+    const sentBeforeHello = session.sendToBrowser(status)
+    sendHello(session)
+    const sentPaired = session.sendToBrowser(status)
+    const ac = new AbortController()
+    const call = session.callBrowserTool("list_cells", {}, ac.signal, "c1")
+    ac.abort()
+    await call
+
+    // Then only the paired console gets the frame, and the call names "c1"
+    expect(sentUnconnected).toBe(false)
+    expect(sentBeforeHello).toBe(false)
+    expect(sentPaired).toBe(true)
+    expect(browser.sent.filter((m) => m.type === "agent_status")).toHaveLength(
+      1,
+    )
+    expect(browser.sent.find((m) => m.type === "tool_call")).toMatchObject({
+      name: "list_cells",
+      conversationId: "c1",
+    })
+  })
+
+  it("opens a console served under a path at that path", () => {
+    // Given
+    const { session } = makeSession({
+      consoleOrigin: "https://questdb.acme.io",
+      consoleUrl: "https://questdb.acme.io/questdb",
+    })
+
+    // When
+    const link = new URL(session.buildDeepLink())
+
+    // Then
+    expect(`${link.origin}${link.pathname}`).toBe(
+      "https://questdb.acme.io/questdb/",
+    )
+    expect(link.searchParams.get("mcp-pair")).toBe("1")
+  })
+
+  it("tells the agent whether the console that pairs is the one that left", () => {
+    // Given a session with an agent channel and a paired console
+    const { session } = makeSession()
+    const channel = makeAgentChannel()
+    session.attachAgentChannel(channel)
+    const first = makeFakeBrowser()
+    session.attachBrowser(first.conn)
+    sendHello(session)
+    const issued = getSessionId(session)
+
+    // When the same console takes over its stale socket, then leaves and
+    // comes back, then a reloaded page pairs without the session it had
+    const takeover = makeFakeBrowser()
+    session.attachBrowser(takeover.conn, issued)
+    sendHello(session)
+    session.handleSocketClose(takeover.conn)
+    const back = makeFakeBrowser()
+    session.attachBrowser(back.conn, issued)
+    sendHello(session)
+    session.handleSocketClose(back.conn)
+    const reloaded = makeFakeBrowser()
+    session.attachBrowser(reloaded.conn)
+    sendHello(session)
+    session.handleSocketClose(reloaded.conn)
+    const stranger = makeFakeBrowser()
+    session.attachBrowser(stranger.conn, "some-other-session")
+    sendHello(session)
+
+    // Then
+    expect(channel.onBrowserAttached.mock.calls).toEqual([
+      [false],
+      [true],
+      [true],
+      [false],
+      [false],
+    ])
+  })
+
+  it("passes a rejected prompt or answer on to the agent channel, so the console gets an answer", () => {
+    // Given a session with an agent channel and a paired console
+    const { session } = makeSession()
+    const channel = makeAgentChannel()
+    session.attachAgentChannel(channel)
+    session.attachBrowser(makeFakeBrowser().conn)
+    sendHello(session)
+
+    // When the console sends frames that fail validation
+    session.handleMessage({
+      ...agentPrompt,
+      prompt: [{ type: "text", text: "x".repeat(1_000_001) }],
+    })
+    session.handleMessage({
+      v: MCP_BRIDGE_VERSION,
+      type: "agent_question_answer",
+      requestId: "r1",
+      answers: Object.fromEntries(
+        Array.from({ length: 51 }, (_, i) => [`f${i}`, "a"]),
+      ),
+    })
+    session.handleMessage({ ...agentPrompt, turnId: "" })
+
+    // Then the prompt and the answer are rejected by id; a frame without one
+    // is only dropped
+    expect(channel.handleBrowserMessage).not.toHaveBeenCalled()
+    expect(channel.handleRejectedMessage.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          type: "agent_prompt",
+          conversationId: "c1",
+          turnId: "t1",
+        }),
+      ],
+      [
+        expect.objectContaining({
+          type: "agent_question_answer",
+          requestId: "r1",
+        }),
+      ],
+    ])
+  })
+
+  it("reports a frame for a closing socket as not sent", () => {
+    // Given a paired console whose socket starts to close
+    const { session } = makeSession()
+    const socket = {
+      readyState: WebSocket.OPEN as number,
+      bufferedAmount: 0,
+      send: vi.fn(),
+      close: () => {},
+      terminate: () => {},
+    }
+    session.attachBrowser(createBrowserConn(socket, {}))
+    sendHello(session)
+    socket.readyState = WebSocket.CLOSING
+    socket.send.mockClear()
+
+    // When the agent sends a frame before the close event
+    const sent = session.sendToBrowser({
+      v: MCP_BRIDGE_VERSION,
+      type: "agent_turn_end",
+      conversationId: "c1",
+      turnId: "t1",
+      result: { outcome: "completed", stopReason: "end_turn", usage: null },
+    })
+
+    // Then it is reported as not sent, so the agent keeps it
+    expect(session.getState()).toBe("S1")
+    expect(sent).toBe(false)
+    expect(socket.send).not.toHaveBeenCalled()
+  })
+
+  it("tells the caller of a tool the recovery it was configured with while no console is paired", async () => {
+    // Given an agent mode session with no console
+    const { session } = makeSession({
+      notPairedRecovery: "Recovery: wait for the console.",
+    })
+
+    // When a tool is called
+    const result = await session.callBrowserTool("list_cells", {})
+
+    // Then
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toBe(
+      "BRIDGE_NOT_PAIRED: This tool requires a paired QuestDB Web Console.\nRecovery: wait for the console.",
+    )
   })
 })

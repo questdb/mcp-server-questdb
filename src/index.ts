@@ -15,35 +15,13 @@ import { createWsListener } from "./wsListener.js"
 import { createShutdownController } from "./shutdown.js"
 import { parseCli, parsePort } from "./cli.js"
 import { Logger } from "./logger.js"
-import { readFileSync, writeSync } from "node:fs"
-import { fileURLToPath } from "node:url"
-
-const DEFAULT_CONSOLE_ORIGIN = "http://127.0.0.1:9000"
-
-const PER_TOOL_TIMEOUT_MS: Record<string, number> = {
-  run_cell: 300_000,
-  run_query: 300_000,
-  apply_notebook_state: 300_000,
-  create_notebook: 15_000,
-  add_cell: 15_000,
-  update_cell: 15_000,
-  delete_cell: 15_000,
-  duplicate_cell: 15_000,
-  move_cell_up: 15_000,
-  move_cell_down: 15_000,
-  set_layout_mode: 15_000,
-  set_cell_layout: 15_000,
-  set_cell_mode: 15_000,
-  set_cell_chart_config: 15_000,
-  set_cell_autorefresh: 15_000,
-  set_cell_view_maximized: 15_000,
-  set_cell_maximized: 15_000,
-  list_cells: 15_000,
-  get_cell: 15_000,
-  get_notebook_state: 15_000,
-  get_workspace_state: 15_000,
-  get_recent_user_actions: 15_000,
-}
+import { writeSync } from "node:fs"
+import { toolDeadlineMs } from "./toolDeadlines.js"
+import {
+  connectUsage,
+  DEFAULT_CONSOLE_ORIGIN,
+  parseConnectOptions,
+} from "./agent/connectOptions.js"
 
 // How the user invokes us, rendered per distribution channel: the npm install
 // goes through npx; the standalone bundle is a file run with node.
@@ -52,14 +30,21 @@ const LAUNCH =
     ? `node ${commandArg(selfPath())}`
     : `npx ${BRIDGE_PACKAGE}`
 
-const USAGE = `${BRIDGE_PACKAGE} — bridge coding agents to a running QuestDB Web Console.
+const USAGE = `Connect your coding agent to the QuestDB Web Console.
 
-Usage:
-  ${LAUNCH} [start]    Start the bridge (default when no command is given)
-  ${LAUNCH} setup      Configure the bridge for your coding agents (interactive)
-  ${LAUNCH} upgrade    Re-pin existing coding-agent configs to this version
-  ${LAUNCH} --version  Print the version and exit
-  ${LAUNCH} --help     Print this help and exit
+${connectUsage(LAUNCH)}
+Or let your coding agent work from your terminal:
+  ${LAUNCH} setup
+      Set up your coding agents, then ask them to connect to the
+      QuestDB Web Console
+  ${LAUNCH} upgrade
+      Update the version your coding agents use
+
+Other:
+  ${LAUNCH} --version, -v
+      Print the version and exit
+  ${LAUNCH} --help, -h
+      Print this help and exit
 `
 
 // Synchronous, best-effort writes to a standard fd.
@@ -71,18 +56,7 @@ const writeFd = (fd: number, text: string): void => {
   }
 }
 
-const helpText = (): string => {
-  // A standalone bundle is a lone file — whatever README.md happens to sit
-  // near it is not ours to print.
-  if (DISTRIBUTION_CHANNEL === "standalone") return USAGE
-  try {
-    const readmePath = fileURLToPath(new URL("../README.md", import.meta.url))
-    return readFileSync(readmePath, "utf8")
-  } catch {
-    // README not readable (missing in the install, permissions, sandbox).
-    return USAGE
-  }
-}
+const helpText = (): string => USAGE
 
 // Parse argv before any logger/server side effects so --version and --help
 // stay pure (no log file, no port allocation) and exit immediately.
@@ -113,6 +87,47 @@ if (cli.kind === "upgrade") {
 const logger = new Logger()
 const { log, fatal } = logger
 
+if (cli.kind === "connect") {
+  const parsed = parseConnectOptions(cli.args, process.env, process.cwd())
+  if (parsed.kind === "help") {
+    writeFd(process.stdout.fd, connectUsage(LAUNCH))
+    process.exit(0)
+  }
+  if (parsed.kind === "error") {
+    writeFd(process.stderr.fd, `${parsed.error}\n\n${connectUsage(LAUNCH)}`)
+    process.exit(2)
+  }
+  const options = parsed.options
+  const chooser = await import("./agent/chooseAgent.js")
+  if (options.agent === null) {
+    // Asking needs a terminal; a script names the agent instead.
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      writeFd(process.stderr.fd, `${chooser.NO_TTY_AGENT_ERROR}\n`)
+      process.exit(2)
+    }
+    try {
+      options.agent = { kind: "preset", id: await chooser.askForAgent() }
+    } catch {
+      // Ctrl+C at the question.
+      process.exit(130)
+    }
+  }
+  const { runConnect } = await import("./agent/connect.js")
+  const agent = options.agent
+  // Remember a choice that works: an agent that cannot be found or
+  // installed is not preselected next time.
+  const remember = async () => {
+    if (agent.kind === "preset") await chooser.writeLastAgent(agent.id)
+  }
+  await runConnect({ ...options, agent }, logger, remember).catch(
+    (err: unknown) => {
+      fatal(
+        `connect failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    },
+  )
+}
+
 const main = async () => {
   const portChoice = parsePort(process.env.MCP_BRIDGE_PORT)
   if ("error" in portChoice) {
@@ -139,7 +154,7 @@ const main = async () => {
     token,
     getPort: () => port,
     consoleOrigin,
-    getDeadlineMs: (toolName) => PER_TOOL_TIMEOUT_MS[toolName] ?? 15_000,
+    getDeadlineMs: toolDeadlineMs,
     log,
   })
 
@@ -191,13 +206,21 @@ const main = async () => {
   })
   fatalShutdown = (kind, err) => void requestFatal(kind, err)
 
-  process.on("SIGINT", () => void shutdown())
-  process.on("SIGTERM", () => void shutdown())
-  process.stdin.on("end", () => void shutdown())
-  process.stdin.on("close", () => void shutdown())
+  process.on("SIGINT", () => void shutdown("received SIGINT"))
+  process.on("SIGTERM", () => void shutdown("received SIGTERM"))
+  process.on(
+    "SIGHUP",
+    () => void shutdown("received SIGHUP: the terminal was closed"),
+  )
+  process.stdin.on(
+    "end",
+    () => void shutdown("stdin ended: the MCP client closed the connection"),
+  )
+  process.stdin.on("close", () => void shutdown("stdin closed"))
 }
 
-main().catch((err: unknown) => {
-  const text = err instanceof Error ? (err.stack ?? err.message) : String(err)
-  fatal(`startup error: ${text}`, 1)
-})
+if (cli.kind === "start")
+  main().catch((err: unknown) => {
+    const text = err instanceof Error ? (err.stack ?? err.message) : String(err)
+    fatal(`startup error: ${text}`, 1)
+  })

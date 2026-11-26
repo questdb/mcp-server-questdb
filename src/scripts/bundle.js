@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url"
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const packageFile = join(repoRoot, "package.json")
 const definitionsFile = join(repoRoot, "src/consts/shared-definitions.json")
+const agentInstallsFile = join(repoRoot, "src/consts/agent-installs.json")
 const pkg = JSON.parse(readFileSync(packageFile, "utf8"))
 const version = pkg.version
 
@@ -68,6 +69,7 @@ const bundleName = `mcp-server-questdb-${version}.mjs`
 const outfile = join(outDir, bundleName)
 const noticesFile = join(outDir, "THIRD_PARTY_NOTICES.txt")
 const sharedDefinitions = JSON.parse(readFileSync(definitionsFile, "utf8"))
+const agentInstalls = JSON.parse(readFileSync(agentInstallsFile, "utf8"))
 
 const legalHeader =
   `/*! @questdb/mcp-server-questdb v${version} — Apache-2.0.\n` +
@@ -88,6 +90,7 @@ const result = await build({
     __BRIDGE_VERSION__: JSON.stringify(version),
     __BRIDGE_DISTRIBUTION__: '"standalone"',
     __BUNDLED_SHARED_DEFINITIONS__: JSON.stringify(sharedDefinitions),
+    __BUNDLED_AGENT_INSTALLS__: JSON.stringify(agentInstalls),
   },
   // Prefer ESM entries: jsonc-parser's default (UMD) entry does runtime
   // relative requires that cannot resolve from a single-file bundle.

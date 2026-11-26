@@ -3,10 +3,12 @@ import { bindWithRetry, type AttemptListenFn } from "../bindWithRetry.js"
 
 const noopStop = (): Promise<void> => Promise.resolve()
 
-const stubListen = (calls: number[]): AttemptListenFn => (p) => {
-  calls.push(p)
-  return Promise.resolve({ stop: noopStop })
-}
+const stubListen =
+  (calls: number[]): AttemptListenFn =>
+  (p) => {
+    calls.push(p)
+    return Promise.resolve({ stop: noopStop })
+  }
 
 const eaddrinuseError = (port: number): Error => {
   const err = new Error(
@@ -77,6 +79,36 @@ describe("bindWithRetry", () => {
     ).rejects.toMatchObject({ code: "port-pinned-in-use" })
     expect(listenCalls).toEqual([5000])
     expect(findFreePort).not.toHaveBeenCalled()
+  })
+
+  it("names the setting that pinned a taken port", async () => {
+    // Given a pinned port that is taken
+    const attemptListen: AttemptListenFn = (p) =>
+      Promise.reject(eaddrinuseError(p))
+    const findFreePort = vi.fn(() => Promise.resolve(6000))
+
+    // When it was pinned with the default (MCP_BRIDGE_PORT) and with --port
+    const byEnv = bindWithRetry({
+      port: 5000,
+      isPinned: true,
+      attemptListen,
+      findFreePort,
+    })
+    const byOption = bindWithRetry({
+      port: 5000,
+      isPinned: true,
+      pinnedBy: { name: "--port", unpin: "leave out --port" },
+      attemptListen,
+      findFreePort,
+    })
+
+    // Then each error says how to free it
+    await expect(byEnv).rejects.toThrow(
+      "Port 5000 (set by MCP_BRIDGE_PORT) is in use. Pick a different port, or unset MCP_BRIDGE_PORT to use a free one.",
+    )
+    await expect(byOption).rejects.toThrow(
+      "Port 5000 (set by --port) is in use. Pick a different port, or leave out --port to use a free one.",
+    )
   })
 
   it("throws port-exhausted when both attempts hit EADDRINUSE", async () => {

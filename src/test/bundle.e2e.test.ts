@@ -17,6 +17,7 @@ import WebSocket from "ws"
 import { BUNDLED_TOOL_NAMES } from "../bundledTools.js"
 import { bundleFileName, commandArg } from "../distribution.js"
 import { MCP_BRIDGE_VERSION } from "../protocolVersion.js"
+import { NO_TTY_AGENT_ERROR } from "../agent/chooseAgent.js"
 
 const execFileP = promisify(execFile)
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
@@ -201,6 +202,13 @@ describe.skipIf(process.platform === "win32")("standalone bundle e2e", () => {
   it("--help renders standalone (node, not npx) usage", async () => {
     const { stdout } = await execFileP(process.execPath, [bundlePath, "--help"])
     expect(stdout).toContain(`node ${commandArg(bundlePath)} setup`)
+    expect(stdout).toContain(
+      `node ${commandArg(bundlePath)} connect [console-url] [options]`,
+    )
+    expect(stdout).toContain("--workspace <dir>")
+    // The bundle's own path is a temporary folder named after the test.
+    const usage = stdout.replaceAll(commandArg(bundlePath), "<bundle>")
+    expect(usage).not.toMatch(/\bstart\b|bridge/)
     expect(stdout).not.toContain("UNRELATED SENTINEL README")
     expect(stdout).not.toContain("npx @questdb/mcp-server-questdb setup")
   })
@@ -344,6 +352,30 @@ describe.skipIf(process.platform === "win32")("standalone bundle e2e", () => {
     expect(err.stderr).not.toContain("npx")
   })
 
+  it("connect without --agent and without a terminal asks for --agent and starts nothing", async () => {
+    // Given
+    const home = join(dir, "connect-no-tty")
+    mkdirSync(home)
+
+    // When
+    const err = (await execFileP(
+      process.execPath,
+      [bundlePath, "connect", "http://127.0.0.1:9000", "--no-open"],
+      {
+        cwd: home,
+        env: {
+          ...isolatedEnv(home),
+          QUESTDB_MCP_SERVER_HOME: join(home, "mcp-server"),
+        },
+      },
+    ).catch((e: unknown) => e)) as { code: number; stderr: string }
+
+    // Then
+    expect(err.code).toBe(2)
+    expect(err.stderr.trim()).toBe(NO_TTY_AGENT_ERROR)
+    expect(existsSync(join(home, "mcp-server"))).toBe(false)
+  })
+
   it("pairing WebSocket enforces the token and accepts a bearer", async () => {
     const creds = await session.rpc(3, "tools/call", {
       name: "get_pairing_credentials",
@@ -351,12 +383,15 @@ describe.skipIf(process.platform === "win32")("standalone bundle e2e", () => {
     })
     const text = creds.result?.content?.[0]?.text
     expect(text).toBeDefined()
-    const { wsUrl, token } = JSON.parse(text!) as {
+    const { wsUrl, token, deepLink } = JSON.parse(text!) as {
       wsUrl?: string
       token?: string
+      deepLink?: string
     }
     expect(wsUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+$/)
     expect(token).toBeTruthy()
+    // The console names the agent from its MCP clientInfo.
+    expect(new URL(deepLink!).searchParams.get("mcp-client")).toBe("e2e")
 
     const origin = "http://127.0.0.1:9000"
     expect(await wsAttempt(`${wsUrl}/?token=wrong`, origin)).toContain("401")
@@ -364,4 +399,156 @@ describe.skipIf(process.platform === "win32")("standalone bundle e2e", () => {
       await wsAttempt(`${wsUrl}/?token=${encodeURIComponent(token!)}`, origin),
     ).toBe("connected")
   })
+
+  // `connect` with the scripted fake agent, until it prints its pairing link.
+  const startConnect = async (name: string) => {
+    const home = join(dir, `connect-${name}`)
+    mkdirSync(home)
+    const pidFile = join(home, "agent-pids")
+    const child = spawn(
+      process.execPath,
+      [
+        bundlePath,
+        "connect",
+        "http://127.0.0.1:9000",
+        "--agent-command",
+        `${process.execPath} ${FAKE_AGENT}`,
+        "--no-open",
+        "--workspace",
+        join(home, "workspace"),
+      ],
+      {
+        cwd: home,
+        env: {
+          ...isolatedEnv(home),
+          QUESTDB_MCP_SERVER_HOME: join(home, "mcp-server"),
+          FAKE_AGENT_PID_FILE: pidFile,
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    )
+    const exited = new Promise<number | null>((done) =>
+      child.once("exit", (code) => done(code)),
+    )
+    let stderr = ""
+    const link = await new Promise<URL>((done, fail) => {
+      const timer = setTimeout(
+        () => fail(new Error(`connect printed no pairing link:\n${stderr}`)),
+        15_000,
+      )
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString()
+        const found = /^\s+(http\S+mcp-token\S+)$/m.exec(stderr)
+        if (found) {
+          clearTimeout(timer)
+          done(new URL(found[1]))
+        }
+      })
+    })
+    const agentPid = await waitUntil(() => {
+      const pid = Number(
+        existsSync(pidFile) ? readFileSync(pidFile, "utf8").split("\n")[0] : "",
+      )
+      return pid > 0 ? pid : null
+    })
+    return { child, exited, link, agentPid }
+  }
+
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    it(`connect stops its agent and exits cleanly on ${signal}`, async () => {
+      // Given a running connect with its agent started
+      const connection = await startConnect(signal)
+
+      // When
+      connection.child.kill(signal)
+
+      // Then
+      expect(await connection.exited).toBe(0)
+      await waitUntil(() => (isRunning(connection.agentPid) ? null : true))
+    }, 30_000)
+  }
+
+  it("connect takes a message with images past the old 4 MB frame limit and answers it", async () => {
+    // Given a console paired with connect
+    const connection = await startConnect("large-prompt")
+    const wsUrl = connection.link.searchParams.get("mcp-ws")!
+    const token = connection.link.searchParams.get("mcp-token")!
+    const ws = new WebSocket(`${wsUrl}/?token=${encodeURIComponent(token)}`, {
+      headers: { origin: "http://127.0.0.1:9000" },
+    })
+    type Frame = { type: string; turnId?: string; result?: unknown }
+    const frames: Frame[] = []
+    ws.on("message", (data) => {
+      frames.push(JSON.parse((data as Buffer).toString("utf8")) as Frame)
+    })
+    await new Promise((done) => ws.once("open", done))
+    ws.send(
+      JSON.stringify({
+        v: MCP_BRIDGE_VERSION,
+        type: "hello",
+        token,
+        userAgent: "e2e",
+        expectedBridgeVersion: MCP_BRIDGE_VERSION,
+        consoleOrigin: "http://127.0.0.1:9000",
+        tools: [],
+        permissions: { grantSchemaAccess: true, read: true, write: true },
+      }),
+    )
+    await waitUntil(() => frames.find((f) => f.type === "hello_ack") ?? null)
+
+    try {
+      // When it sends a message of about 6 MB
+      const image = {
+        type: "image",
+        mimeType: "image/png",
+        data: "A".repeat(3_000_000),
+      }
+      ws.send(
+        JSON.stringify({
+          v: MCP_BRIDGE_VERSION,
+          type: "agent_prompt",
+          conversationId: "c1",
+          turnId: "t1",
+          prompt: [{ type: "text", text: "hello" }, image, image],
+        }),
+      )
+
+      // Then the turn is answered
+      const end = await waitUntil(
+        () =>
+          frames.find(
+            (f) => f.type === "agent_turn_end" && f.turnId === "t1",
+          ) ?? null,
+      )
+      expect(end.result).toMatchObject({ outcome: "completed" })
+    } finally {
+      ws.close()
+      connection.child.kill("SIGTERM")
+      await connection.exited
+    }
+  }, 30_000)
 })
+
+const FAKE_AGENT = fileURLToPath(
+  new URL("./fixtures/fakeAgent.mjs", import.meta.url),
+)
+
+const isRunning = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Polls until `probe` returns a value, for at most 15 seconds.
+const waitUntil = async <T>(probe: () => T | null): Promise<T> => {
+  const deadline = Date.now() + 15_000
+  for (;;) {
+    const value = probe()
+    if (value !== null) return value
+    if (Date.now() > deadline) throw new Error("timed out")
+    await new Promise((done) => setTimeout(done, 50))
+  }
+}
