@@ -72,7 +72,6 @@ describe("bundledTools", () => {
       "maximized_cell_id",
       "variables",
       "cells",
-      "chart_types",
       "chart_sync",
     ])
   })
@@ -123,16 +122,21 @@ describe("bundledTools", () => {
   it("ships the dashboard tools", () => {
     const names = BUNDLED_FUNCTIONAL_TOOLS.map((t) => t.name)
     for (const name of [
+      "get_cell_image",
       "set_cell_visual",
       "set_cell_custom_chart",
       "set_cell_formats",
       "set_cell_interactions",
-      "define_chart_type",
-      "get_chart_type",
-      "delete_chart_type",
       "set_notebook_chart_sync",
     ]) {
       expect(names).toContain(name)
+    }
+    for (const name of [
+      "define_chart_type",
+      "get_chart_type",
+      "delete_chart_type",
+    ]) {
+      expect(names).not.toContain(name)
     }
   })
 

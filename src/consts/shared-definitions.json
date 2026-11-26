@@ -241,7 +241,7 @@
     "surfaces": ["ai", "mcp"],
     "mutatesNotebook": false,
     "createsNotebook": false,
-    "description": "Get full details of a cell (value, kind via `type`, editor_height/result_height, view, chart config, last-run status + trimmed error). Height values are fixed CSS pixels or \"auto\". `view` reports what a SQL/draw cell presents: \"editor\" while there is nothing to show, else the stored result or editor_result arrangement. Markdown has no pane-view state: it reports `view` and `result_height` as null. Other LIVE-ONLY fields are `refreshing: true`, `last_refresh_error`, and `auto_refresh_blocked: \"contains_write\"`; absence never means \"not refreshing\" or \"not blocked\". `last_run_status` is unrelated to refresh state: it stays the outcome of the last completed RUN. `type:\"markdown\"` marks a prose cell whose `value` is markdown source; SQL cells omit `type`. Never includes query result data. By default the value is capped at 4 KB; a capped response carries `truncated: true` and `full_length`. A truncated value is NOT the cell's real content — NEVER write it back (update_cell / apply_notebook_state value); re-read with get_full_content: true first, or keep the cell with preserve_value: true.",
+    "description": "Get full details of a cell (value, kind via `type`, editor_height/result_height, view, chart config, last-run status + trimmed error). Height values are fixed CSS pixels or \"auto\". `view` reports what a SQL/draw cell presents: \"editor\" while there is nothing to show, else the stored result or editor_result arrangement. Markdown has no pane-view state: it reports `view` and `result_height` as null. Other LIVE-ONLY fields are `refreshing: true`, `last_refresh_error`, and `auto_refresh_blocked: \"contains_write\"`; absence never means \"not refreshing\" or \"not blocked\". `last_run_status` is unrelated to refresh state: it stays the outcome of the last completed RUN. `type:\"markdown\"` marks a prose cell whose `value` is markdown source; SQL cells omit `type`. Without the 'read' permission it never includes query result data. A draw cell's `render_report` lists the problems found while drawing and, with 'read', what its chart drew (`drawn`: counts, and values such as a gauge's reading); without 'read', `drawn_withheld` stands in for `drawn`. `render_report.status` says whether the chart is drawn, waiting (a draw is pending: its query is loading or its SQL was just edited; read the cell again), empty (the query returned no rows), failed (a statement or the world map failed), blocked (a write query, or SQL that could not be classified), cancelled (the user stopped it) or refused (rows it cannot draw: missing columns, a row-capped result it needs whole); when it is not drawn, the first problem is the sentence the pane shows. By default the value is capped at 4 KB; a capped response carries `truncated: true` and `full_length`. A truncated value is NOT the cell's real content — NEVER write it back (update_cell / apply_notebook_state value); re-read with get_full_content: true first, or keep the cell with preserve_value: true.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -1073,7 +1073,7 @@
     "surfaces": ["mcp"],
     "mutatesNotebook": false,
     "createsNotebook": false,
-    "description": "A PNG picture of a draw cell's chart as the console shows it now (theme, size, layout, data), with the cell's render_report. Use it to check how a chart LOOKS after set_cell_chart_config / set_cell_visual / set_cell_custom_chart / define_chart_type: overlapping or cut labels, empty space, unreadable colours, a chart that draws nothing. The notebook must be open in the console (activate_notebook); a cell off screen is scrolled into view first. Components drawn in HTML (stat, bullet, orderBook, uptime, planTree) have no picture: the result says so and carries their render_report. If another cell is maximized, only that one is drawn: clear it with set_cell_maximized first. Needs the 'read' permission (the picture shows query results). Returns {picture, width, height, render_report} plus the image.",
+    "description": "A PNG picture of a draw cell's chart as the console shows it now (theme, size, layout, data), with the cell's render_report. Use it to check how a chart LOOKS after set_cell_chart_config / set_cell_visual / set_cell_custom_chart: overlapping or cut labels, empty space, unreadable colours, a chart that draws nothing. The notebook must be open in the console (activate_notebook); a cell off screen is scrolled into view first. Components drawn in HTML (stat, bullet, orderBook, uptime, planTree) have no picture: the result says so and carries their render_report. If another cell is maximized, only that one is drawn: clear it with set_cell_maximized first. Needs the 'read' permission (the picture shows query results). Returns {picture, width, height, render_report} plus the image.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -1094,7 +1094,7 @@
     "surfaces": ["ai", "mcp"],
     "mutatesNotebook": true,
     "createsNotebook": false,
-    "description": "Draw a draw-mode cell as a COMPONENT instead of a chart: stat tiles, gauge, bullet, order book, state timeline, treemap, sunburst, graph, Sankey, chord, map, liquidity heatmap, volume profile or query plan tree. The console styles it; the QUERY does the shaping (aggregation, bucketing, sorting) and the component maps as little as possible. Roles map columns by name; every role has a default, so a query that returns the documented column order needs no mapping. The cell must be in draw mode (set_cell_mode 'draw'). Column formats (set_cell_formats) set number formats and colour thresholds; set_cell_interactions makes clicks set a variable. visual:null removes the visual (back to the preset chart). After it draws, get_cell returns render_report with what was drawn and any missing columns.\n\nTYPES (statements are the cell's ;-separated SELECTs, first = statement 0):\n- stat: one tile per row of statement 0. value (default: first numeric), label (default: first text column), caption (optional text under the value, e.g. '254 use WAL'), change (a FRACTION, e.g. 0.012 = +1.2%; default: a column named change). Sparkline: statement `sparkline_query` (default statement 1) with rows (time, value[, label]); rows whose label matches the tile's draw its line. Tip: SELECT symbol, last(price) price, last(price)/first(price)-1 change FROM t WHERE ts > dateadd('d',-1,now()); SELECT ts, symbol, last(price) price FROM t SAMPLE BY 5m.\n- gauge: first row of statement 0. value, label; min/max (default 0..100, or 0..1 when the value's format is percent); colour bands from the value column's format thresholds.\n- bullet: one bar per row: label, value, target (default: a column named target, limit, budget or max); min/max; bands from thresholds. For limit usage, VaR vs limit.\n- orderBook: statement 0 = ASKS, best (lowest price) first; statement 1 = BIDS, best (highest price) first. price and size = first two columns (or columns.price/size); a third column shows as is (cumulative size, order count). Spread and mid are shown; depth bars update without flashing. Use formats for price decimals (kind price) and size (compact).\n- stateTimeline: coloured state bands per lane. time (default: first timestamp), lane (default: first text), state; end optional (default: the lane's next row). States named ok/up/active colour positive, down/error/failed negative, warning/degraded warning; `severity` overrides.\n- uptime: a status page. Same rows as stateTimeline (time, lane, state[, end]); per lane the current state, `buckets` bars over the time range each coloured by the worst state inside it (hover lists the time per state), and the uptime %. For service, replication or device health.\n- treemap / sunburst: path = text columns from outer to inner level (default: all text columns in order), value (default: first numeric) sizes the leaf; change (optional, a number) colours leaves on a red-to-green diverging scale (market movers).\n- graph / sankey / chord: from, to, value (default: columns 1, 2, 3). graph = force layout sized by flow; sankey = flows left to right; chord = flows around a circle.\n- map: world map. Either region (country name as in Natural Earth, e.g. 'Germany', 'United States of America') + value, coloured on a scale; or lat + lon (+ value, label) as sized points.\n- liquidityHeatmap: time x price cells coloured by value (time, price, value; default first timestamp, first and second numerics). Bucket in SQL (SAMPLE BY, round(price, n)). Optional statement 1 (time, price) draws a price line on top.\n- volumeProfile: horizontal volume per price level: price, buy, sell (default columns 1-3) or value; marks the point of control.\n- planTree: statement 0 is EXPLAIN <query>; draws the plan as an operator tree with attributes.",
+    "description": "Draw a draw-mode cell as a COMPONENT instead of a chart: stat tiles, gauge, bullet, order book, state timeline, treemap, sunburst, graph, Sankey, chord, map, liquidity heatmap, volume profile, footprint or query plan tree. The console styles it; the QUERY does the shaping (aggregation, bucketing, sorting) and the component maps as little as possible. Roles map columns by name; every role has a default, so a query that returns the documented column order needs no mapping. The cell must be in draw mode (set_cell_mode 'draw'). Column formats (set_cell_formats) set number formats and colour thresholds; set_cell_interactions makes clicks set a variable. visual:null removes the visual (back to the preset chart). After it draws, get_cell returns render_report with what was drawn and any missing columns.\n\nTYPES (statements are the cell's ;-separated SELECTs, first = statement 0):\n- stat: one tile per row of statement 0. value (default: first numeric), label (default: first text column), caption (optional text under the value, e.g. '254 use WAL'), change (a FRACTION, e.g. 0.012 = +1.2%; default: a column named change). Sparkline: statement `sparkline_query` (default statement 1) with rows (time, value[, label]); rows whose label matches the tile's draw its line. Tip: SELECT symbol, last(price) price, last(price)/first(price)-1 change FROM t WHERE ts > dateadd('d',-1,now()); SELECT ts, symbol, last(price) price FROM t SAMPLE BY 5m.\n- gauge: first row of statement 0. value, label; min/max (default 0..100, or 0..1 when the value's format is percent); colour bands from the value column's format thresholds.\n- bullet: one bar per row: label, value, target (default: a column named target, limit, budget or max); min/max; bands from thresholds. For limit usage, VaR vs limit.\n- orderBook: statement 0 = ASKS, best (lowest price) first; statement 1 = BIDS, best (highest price) first. price and size = first two columns (or columns.price/size); a third column shows as is (cumulative size, order count). Spread and mid are shown; depth bars update without flashing. Use formats for price decimals (kind price) and size (compact).\n- stateTimeline: coloured state bands per lane. time (default: first timestamp), lane (default: first text), state; end optional (default: the lane's next row). States named ok/up/active colour positive, down/error/failed negative, warning/degraded warning; `severity` overrides.\n- uptime: a status page. Same rows as stateTimeline (time, lane, state[, end]); per lane the current state, `buckets` bars over the time range each coloured by the worst state inside it (hover lists the time per state), and the uptime %. For service, replication or device health.\n- treemap / sunburst: path = text columns from outer to inner level (default: all text columns in order), value (default: first numeric) sizes the leaf; change (optional, a number) colours leaves on a red-to-green diverging scale (market movers).\n- graph / sankey / chord: from, to, value (default: columns 1, 2, 3). graph = force layout sized by flow; sankey = flows left to right; chord = flows around a circle.\n- map: world map. Either region (country name as in Natural Earth, e.g. 'Germany', 'United States of America') + value, coloured on a scale; or lat + lon (+ value, label) as sized points.\n- liquidityHeatmap: time x price cells coloured by value (time, price, value; default first timestamp, first and second numerics). Bucket in SQL (SAMPLE BY, round(price, n)). Optional statement 1 (time, price) draws a price line on top.\n- volumeProfile: horizontal volume per price level: price, buy, sell (default columns 1-3) or value; marks the point of control.\n- footprint: order-flow footprint. One row per bar and price level: time, price, buy, sell (default: first timestamp, then the first three numerics). Each level shows \"sell × buy\"; a level where one side outweighs the other 3:1 is tinted, and each bar's busiest level (point of control) is outlined. Bucket in SQL: SAMPLE BY for bars, floor(price / step) * step for levels. Optional statement 1 (time, open, high, low, close) draws each bar's candle beside its levels. Tip: SELECT ts, floor(price / 25) * 25 lvl, sum(CASE WHEN side = 'buy' THEN amount ELSE 0.0 END) buy, sum(CASE WHEN side = 'sell' THEN amount ELSE 0.0 END) sell FROM trades WHERE symbol = 'BTC-USDT' AND ts > dateadd('h', -2, now()) SAMPLE BY 15m; SELECT ts, first(price), max(price), min(price), last(price) FROM trades WHERE symbol = 'BTC-USDT' AND ts > dateadd('h', -2, now()) SAMPLE BY 15m.\n- planTree: statement 0 is EXPLAIN <query>; draws the plan as an operator tree with attributes.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -1126,6 +1126,7 @@
                 "map",
                 "liquidityHeatmap",
                 "volumeProfile",
+                "footprint",
                 "planTree"
               ]
             },
@@ -1284,7 +1285,7 @@
     "surfaces": ["ai", "mcp"],
     "mutatesNotebook": true,
     "createsNotebook": false,
-    "description": "Draw a draw-mode cell from an ECharts option you write as JSON (option_json, a JSON string), for charts no preset or visual covers: radar, polar bars, funnel, boxplot, parallel, themeRiver, calendar heatmap, pictorialBar, matrix, broken axes, custom series, combinations. option_json:null removes it (back to the preset chart). The cell must be in draw mode.\n\nDATA: never put rows in the option. Each statement of the cell is a dataset with id \"q0\", \"q1\", … whose dimensions are the column names; series bind with {\"datasetId\":\"q0\",\"encode\":{\"x\":\"ts\",\"y\":\"price\"}} (timestamps become a time axis). For series that do not read datasets (graph, sankey, chord, tree, treemap, sunburst, gauge, radar, funnel, heatmap tuples, axis category lists), put a placeholder where the data goes: {\"$rows\":{\"query\":0,\"shape\":S,…}} with shape: tuples (columns:[…]) → [[a,b,c],…]; column (column) → [v,…]; value (column) → first row's number; items (name, value or [values]) → [{name,value}]; tree (path:[…], value, color) → nested children; links (source,target,value) → [{source,target,value}]; nodes (source,target) → [{name}]; lines (columns:[from lon, from lat, to lon, to lat], name, value) → [{coords,name,value}] for a lines series on geo. You may add your own datasets with transforms ({\"fromDatasetId\":\"q0\",\"transform\":{\"type\":\"filter\",…}}) using other ids.\n\nLAYOUT: the console lays the chart out for the panel; do not tune paddings. Grid, calendar, geo, parallel, singleAxis, matrix and the boxes of funnel/sankey/tree/treemap/graph/map, and the center/radius of pie/gauge/sunburst/chord/radar/polar, are fitted to the panel with room for their labels; only their ARRANGEMENT is kept (two grids stacked 70/30, concentric rings, a pie beside a grid). Legends, shown visualMaps and zoom sliders always sit along the bottom. A title placed inside the chart (top: '45%') is an overlay that moves with the chart (e.g. a total in a donut's middle); a title at the edge gets its own band, but the cell name is already the heading.\n\nSTYLE: the console theme sets fonts, palette, axes, tooltips and background; fonts and literal colours are REMOVED. Colour with tones: \"$positive\", \"$negative\", \"$warning\", \"$info\", \"$accent\", \"$neutral\", \"$muted\", \"$series1\"…\"$series8\", optionally with opacity \"$positive:0.3\" (anywhere a colour goes, including visualMap inRange.color and gradient colorStops).\n\nNO JAVASCRIPT: functions cannot be expressed. Formatters are string templates ({a} series, {b} name, {c} value, {d} percent, label templates also {@column}); HTML in tooltip templates is shown as text. Title links, tooltip DOM options and the toolbox are removed; images must be data: URIs. custom series name a renderItem: built-in barRange, lineRange, stage, violin, contour, segmentedDoughnut, or a notebook chart type from define_chart_type. Maps: \"world\" (geo or map series; country names as in Natural Earth).\n\nThe response lists problems found now (removed colours, unknown series types); get_cell's render_report adds problems found while drawing (e.g. encode columns missing from a dataset). Example: {\"radar\":{\"indicator\":{\"$rows\":{\"query\":0,\"shape\":\"items\",\"name\":\"metric\",\"value\":\"max\"}}},\"series\":[{\"type\":\"radar\",\"data\":[{\"name\":\"today\",\"value\":{\"$rows\":{\"query\":0,\"shape\":\"column\",\"column\":\"value\"}},\"areaStyle\":{\"color\":\"$series2:0.25\"}}]}]}",
+    "description": "Draw a draw-mode cell from an ECharts option you write as JSON (option_json, a JSON string), for charts no preset or visual covers: radar, polar bars, funnel, boxplot, parallel, themeRiver, calendar heatmap, pictorialBar, matrix, broken axes, custom series, combinations. option_json:null removes it (back to the preset chart). The cell must be in draw mode.\n\nDATA: never put rows in the option. Each statement of the cell is a dataset with id \"q0\", \"q1\", … whose dimensions are the column names; series bind with {\"datasetId\":\"q0\",\"encode\":{\"x\":\"ts\",\"y\":\"price\"}} (timestamps become a time axis). For series that do not read datasets (graph, sankey, chord, tree, treemap, sunburst, gauge, radar, funnel, heatmap tuples, axis category lists), put a placeholder where the data goes: {\"$rows\":{\"query\":0,\"shape\":S,…}} with shape: tuples (columns:[…]) → [[a,b,c],…]; column (column) → [v,…]; value (column) → first row's number; items (name, value or [values]) → [{name,value}]; tree (path:[…], value, color) → nested children; links (source,target,value) → [{source,target,value}]; nodes (source,target) → [{name}]; lines (columns:[from lon, from lat, to lon, to lat], name, value) → [{coords,name,value}] for a lines series on geo. You may add your own datasets with transforms ({\"fromDatasetId\":\"q0\",\"transform\":{\"type\":\"filter\",…}}) using other ids.\n\nLAYOUT: the console lays the chart out for the panel; do not tune paddings. Grid, calendar, geo, parallel, singleAxis, matrix and the boxes of funnel/sankey/tree/treemap/graph/map, and the center/radius of pie/gauge/sunburst/chord/radar/polar, are fitted to the panel with room for their labels; only their ARRANGEMENT is kept (two grids stacked 70/30, concentric rings, a pie beside a grid). Legends, shown visualMaps and zoom sliders always sit along the bottom. A title placed inside the chart (top: '45%') is an overlay that moves with the chart (e.g. a total in a donut's middle); a title at the edge gets its own band, but the cell name is already the heading.\n\nSTYLE: the console theme sets fonts, palette, axes, tooltips and background; fonts and literal colours are REMOVED. Colour with tones: \"$positive\", \"$negative\", \"$warning\", \"$info\", \"$accent\", \"$neutral\", \"$muted\", \"$series1\"…\"$series8\", optionally with opacity \"$positive:0.3\" (anywhere a colour goes, including visualMap inRange.color and gradient colorStops).\n\nNO JAVASCRIPT: functions cannot be expressed. Formatters are string templates ({a} series, {b} name, {c} value, {d} percent, label templates also {@column}); HTML in tooltip templates is shown as text. One option scope only: timeline and media options (baseOption, options, media, timeline) are rejected; switch what a chart shows with notebook variables. Title links, tooltip DOM options and the toolbox are removed; images must be data: URIs. custom series name a built-in renderItem: barRange, areaRange, lineRange, stage, violin, contour, segmentedDoughnut or footprint. footprint draws order-flow cells: encode x = bar (time or category), y = price level; itemPayload {step: level size, dt: bar length in ms on a time axis, buy, sell: column names, poc: optional 0/1 column outlining the busiest level, ratio: imbalance ratio (default 3), color / color0 / borderColor: buy-imbalance, sell-imbalance and point-of-control colours, label: {color}}. Maps: \"world\" (geo or map series; country names as in Natural Earth).\n\nThe response lists problems found now (removed colours, unknown series types); get_cell's render_report adds problems found while drawing (e.g. encode columns missing from a dataset). Example: {\"radar\":{\"indicator\":{\"$rows\":{\"query\":0,\"shape\":\"items\",\"name\":\"metric\",\"value\":\"max\"}}},\"series\":[{\"type\":\"radar\",\"data\":[{\"name\":\"today\",\"value\":{\"$rows\":{\"query\":0,\"shape\":\"column\",\"column\":\"value\"}},\"areaStyle\":{\"color\":\"$series2:0.25\"}}]}]}",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -1474,7 +1475,7 @@
             },
             "column": {
               "type": ["string", "null"],
-              "description": "Column whose value the click sets. Null = the clicked item's name (category, slice, node, tile label) or, in a grid, the clicked cell."
+              "description": "Column whose value the click sets, read from the row(s) the clicked item was drawn from. Null = the column the item is drawn from (a bar's or slice's category, a lane, a node, a tile's label, a price level) or, in a grid, the clicked cell's column. An item drawn from several rows sets the value only when they all agree; a link sets nothing."
             }
           },
           "required": ["variable", "column"],
@@ -1496,76 +1497,6 @@
         }
       },
       "required": ["buffer_id", "cell_id", "click", "brush"]
-    }
-  },
-  {
-    "name": "define_chart_type",
-    "category": "free",
-    "surfaces": ["ai", "mcp"],
-    "mutatesNotebook": true,
-    "createsNotebook": false,
-    "description": "Define (or replace) a notebook chart type: an ECharts custom-series renderItem written as JavaScript, usable by name from any custom chart option in this notebook ({\"type\":\"custom\",\"renderItem\":\"<name>\",\"datasetId\":\"q0\",\"encode\":{…}}). Draw INSIDE the plot: the console fits the plot area to the panel and only knows about axis labels, so marks or text a renderItem draws past api.coord of the axis range overflow the panel. Leave room in data space instead (e.g. xAxis max 120 for a 0-100 bar with its value written after it). Use it for marks no built-in series draws (lanes, ranges, glyphs, annotated boxes). render_item is a function expression `function (params, api) { … }` or a function body using params and api. It is called once per data item and returns a graphic element or null, e.g. {type:'rect', shape:{x,y,width,height}, style:{fill: api.visual('color')}}. Useful api: api.value(dim) (dimension index or column name), api.coord([x, y]) → pixel point, api.size([dx, dy]) → pixel size of a data step, api.visual('color'); params.coordSys has x, y, width, height of the plot; params.itemPayload is the series' itemPayload object. Return group elements ({type:'group', children:[…]}) for several shapes. Colours: take them from api.visual('color') or the series itemStyle (where tones like \"$accent\" work), not literals. Errors thrown while drawing show in get_cell's render_report. EXPERIMENTAL: the function runs in the console page with the user's rights, so it runs only when allowed: types defined with the 'write' permission are allowed; otherwise (and for imported notebooks) the user allows them in the notebook's Chart types dialog, and charts using them show that they wait. get_chart_type and get_notebook_state report `allowed`.",
-    "inputSchema": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "buffer_id": {
-          "type": "number"
-        },
-        "name": {
-          "type": "string",
-          "description": "Letters, digits, _; starts with a letter; max 64."
-        },
-        "render_item": {
-          "type": "string"
-        },
-        "description": {
-          "type": ["string", "null"]
-        }
-      },
-      "required": ["buffer_id", "name", "render_item", "description"]
-    }
-  },
-  {
-    "name": "get_chart_type",
-    "category": "free",
-    "surfaces": ["ai", "mcp"],
-    "mutatesNotebook": false,
-    "createsNotebook": false,
-    "description": "Read a notebook chart type's renderItem source and description, `allowed` (false: its code does not run until the user allows it), and `used_by`: the ids of the cells whose custom option draws with it (names are listed in get_notebook_state chart_types). People edit, rename and delete chart types in the notebook toolbar's Chart types dialog; a rename there renames the uses too.",
-    "inputSchema": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "buffer_id": {
-          "type": "number"
-        },
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": ["buffer_id", "name"]
-    }
-  },
-  {
-    "name": "delete_chart_type",
-    "category": "free",
-    "surfaces": ["ai", "mcp"],
-    "mutatesNotebook": true,
-    "createsNotebook": false,
-    "description": "Delete a notebook chart type. Custom options that still use it stop drawing those series; the result's note names those cells.",
-    "inputSchema": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "buffer_id": {
-          "type": "number"
-        },
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": ["buffer_id", "name"]
     }
   },
   {
@@ -1691,7 +1622,7 @@
     "surfaces": ["ai", "mcp"],
     "mutatesNotebook": true,
     "createsNotebook": false,
-    "description": "Bulk-apply the entire desired state of a notebook in one atomic call. Use this for bulk edits spanning multiple cells or creating a notebook from scratch. Use update_cell or set_cell_* for small operations. Use INSTEAD OF chained add_cell + update_cell + set_cell_mode + set_cell_chart_config only when composing a multi-cell layout from scratch, changing many cells at once, or restructuring an existing notebook. The cells array is the COMPLETE desired list: cells in the current notebook whose id is missing from your request are DELETED. For new cells, omit `id` and one will be generated. Each cell carries exactly one of `value` (full verbatim SQL) or `preserve_value: true` (keep the existing cell's SQL, results, and run history unchanged). A changed `value` carries results over by content: a statement whose text is unchanged keeps its result, an edited or added one starts empty, and a rewrite that leaves nothing unchanged clears the cell's results — prefer preserve_value for every cell whose SQL you are not changing, and NEVER send a value reconstructed from a preview or a truncated get_cell read. Charts in mode='draw' render automatically — do not call run_cell afterwards. Cells with resolved mode='run' (explicit, or omitted: new defaults to 'run', existing preserves) auto-execute after the apply — EXCEPT cells whose statements include DDL/DML (INSERT/UPDATE/CREATE/DROP/...): those are NEVER auto-executed (their `runs` entry gets `skipped: true`), so applying state can never trigger a write's side effects. Take consent from the user, then call run_cell explicitly to execute them. Markdown cells (type:\"markdown\") are rendered prose and are likewise never auto-run. Auto-executed read-only cells run their statements in PARALLEL (one failure skips nothing; a statement rejected at validation is skipped with its validation error). Each cell also accepts `auto_refresh` — the same per-cell override set_cell_autorefresh writes. The response includes a `runs: [{cellId, success, queryCount?, results?, error?, skipped?}]` array — `results` is the per-statement status list (`\"success\"` / `\"cancelled\"` / `\"ERROR: <message>\"`); a top-level `error` is set only when the run was refused before any statement executed. The response also carries `results_cleared`: the ids of cells whose whole result this apply discarded (view:\"editor\", or a changed value that kept no statement unchanged); it is empty when nothing was cleared, and a cell that keeps some statement results is not listed. Always call get_workspace_state first; the state-freshness gate applies. Dashboard fields: chart_config.visual / chart_config.custom_option_json draw a component or a custom ECharts option (a draw cell with one of them may send queries:[]); formats, interactions and grid_mode are per cell (PUT, like highlight_config); chart_types and chart_sync are notebook-wide (null keeps them).",
+    "description": "Bulk-apply the entire desired state of a notebook in one atomic call. Use this for bulk edits spanning multiple cells or creating a notebook from scratch. Use update_cell or set_cell_* for small operations. Use INSTEAD OF chained add_cell + update_cell + set_cell_mode + set_cell_chart_config only when composing a multi-cell layout from scratch, changing many cells at once, or restructuring an existing notebook. The cells array is the COMPLETE desired list: cells in the current notebook whose id is missing from your request are DELETED. For new cells, omit `id` and one will be generated. Each cell carries exactly one of `value` (full verbatim SQL) or `preserve_value: true` (keep the existing cell's SQL, results, and run history unchanged). A changed `value` carries results over by content: a statement whose text is unchanged keeps its result, an edited or added one starts empty, and a rewrite that leaves nothing unchanged clears the cell's results — prefer preserve_value for every cell whose SQL you are not changing, and NEVER send a value reconstructed from a preview or a truncated get_cell read. Charts in mode='draw' render automatically — do not call run_cell afterwards. Cells with resolved mode='run' (explicit, or omitted: new defaults to 'run', existing preserves) auto-execute after the apply — EXCEPT cells whose statements include DDL/DML (INSERT/UPDATE/CREATE/DROP/...): those are NEVER auto-executed (their `runs` entry gets `skipped: true`), so applying state can never trigger a write's side effects. Take consent from the user, then call run_cell explicitly to execute them. Markdown cells (type:\"markdown\") are rendered prose and are likewise never auto-run. Auto-executed read-only cells run their statements in PARALLEL (one failure skips nothing; a statement rejected at validation is skipped with its validation error). Each cell also accepts `auto_refresh` — the same per-cell override set_cell_autorefresh writes. The response includes a `runs: [{cellId, success, queryCount?, results?, error?, skipped?}]` array — `results` is the per-statement status list (`\"success\"` / `\"cancelled\"` / `\"ERROR: <message>\"`); a top-level `error` is set only when the run was refused before any statement executed. The response also carries `results_cleared`: the ids of cells whose whole result this apply discarded (view:\"editor\", or a changed value that kept no statement unchanged); it is empty when nothing was cleared, and a cell that keeps some statement results is not listed. Always call get_workspace_state first; the state-freshness gate applies. Dashboard fields: chart_config.visual / chart_config.custom_option_json draw a component or a custom ECharts option (a draw cell with one of them may send queries:[]); formats, interactions and grid_mode are per cell (PUT, like highlight_config); chart_sync is notebook-wide (null keeps it).",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -2069,6 +2000,7 @@
                           "map",
                           "liquidityHeatmap",
                           "volumeProfile",
+                          "footprint",
                           "planTree"
                         ]
                       },
@@ -2586,7 +2518,7 @@
                       },
                       "column": {
                         "type": ["string", "null"],
-                        "description": "Column whose value the click sets. Null = the clicked item's name (category, slice, node, tile label) or, in a grid, the clicked cell."
+                        "description": "Column whose value the click sets, read from the row(s) the clicked item was drawn from. Null = the column the item is drawn from (a bar's or slice's category, a lane, a node, a tile's label, a price level) or, in a grid, the clicked cell's column. An item drawn from several rows sets the value only when they all agree; a link sets nothing."
                       }
                     },
                     "required": ["variable", "column"],
@@ -2636,26 +2568,6 @@
             ]
           }
         },
-        "chart_types": {
-          "type": ["array", "null"],
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "name": {
-                "type": "string"
-              },
-              "render_item": {
-                "type": "string"
-              },
-              "description": {
-                "type": ["string", "null"]
-              }
-            },
-            "required": ["name", "render_item", "description"]
-          },
-          "description": "Notebook chart types (see define_chart_type). Null keeps the current ones; an array replaces them all. A type keeps the user's allowance when its code is unchanged; new or changed code runs only with the 'write' permission, else after the user allows it (get_notebook_state shows `allowed`)."
-        },
         "chart_sync": {
           "type": ["object", "null"],
           "additionalProperties": false,
@@ -2679,7 +2591,6 @@
         "maximized_cell_id",
         "variables",
         "cells",
-        "chart_types",
         "chart_sync"
       ]
     }
