@@ -96,7 +96,7 @@ describe("choosing the agent connect runs", () => {
 
     // Then
     expect(screen).toContain(
-      "Which coding agent should work in the AI Assistant?",
+      "Select an agent to use in QuestDB Web Console",
     )
     expect(screen.indexOf("Codex")).toBeLessThan(screen.indexOf("Claude Code"))
     expect(screen).toContain("installed")

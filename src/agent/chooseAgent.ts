@@ -113,7 +113,7 @@ export const agentQuestionOf = (
 ) => {
   const { options, preselected } = agentOptionsOf(found, last)
   return {
-    message: "Which coding agent should work in the AI Assistant?",
+    message: "Select an agent to use in QuestDB Web Console",
     default: preselected,
     choices: options.map((option) => ({
       value: option.id,
